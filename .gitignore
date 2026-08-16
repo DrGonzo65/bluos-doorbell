@@ -1,0 +1,11 @@
+# Local configuration — contains your player IPs and webhook token
+config/config.yaml
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.DS_Store
+
+# Quarantine for files the remote session could not delete
+_to_delete/

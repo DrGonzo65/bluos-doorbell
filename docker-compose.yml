@@ -1,0 +1,17 @@
+services:
+  bluos-doorbell:
+    build: .
+    container_name: bluos-doorbell
+    restart: unless-stopped
+    # host networking keeps things simple: the players need to reach this
+    # service to fetch the chime, and the service needs to reach the players.
+    # If your Docker host and the players are on different VLANs, drop
+    # network_mode and publish 8080 instead, then set service_base_url
+    # in config.yaml to an address the players can actually reach.
+    network_mode: host
+    volumes:
+      - ./config:/config:ro
+      - ./chimes:/chimes:ro
+    environment:
+      DOORBELL_CONFIG: /config/config.yaml
+      DOORBELL_CHIME_DIR: /chimes
