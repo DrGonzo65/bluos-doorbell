@@ -1,0 +1,103 @@
+<?xml version="1.0"?>
+<!--
+  Unraid Docker template.
+
+  Copy to /boot/config/plugins/dockerMan/templates-user/my-bluos-doorbell.xml
+  then in the Unraid GUI: Docker -> Add Container -> select "bluos-doorbell"
+  from the Template dropdown.
+
+  Assumes the image has already been built locally:
+      docker build -t bluos-doorbell:latest /path/to/repo
+-->
+<Container version="2">
+  <Name>bluos-doorbell</Name>
+  <Repository>bluos-doorbell:latest</Repository>
+  <Registry/>
+  <Network>host</Network>
+  <MyIP/>
+  <Shell>bash</Shell>
+  <Privileged>false</Privileged>
+  <Support/>
+  <Project/>
+  <Overview>
+    Plays a doorbell chime on Bluesound BluOS players and restores the exact
+    prior volume and source afterwards, including when players are grouped.
+
+    Triggered by a UniFi Protect Alarm Manager webhook.
+
+    Reads every player's own volume rather than the grouped /Status copy, sends
+    one chime per group primary, and gates concurrent rings so a double press
+    cannot save the already-ducked volume as the restore target.
+
+    Requires host networking: the players must be able to reach this service to
+    fetch the chime file.
+
+    Edit config.yaml in the config folder, then restart the container.
+  </Overview>
+  <Category>HomeAutomation: Other:</Category>
+  <WebUI>http://[IP]:8095/health</WebUI>
+  <TemplateURL/>
+  <Icon>https://raw.githubusercontent.com/selfhst/icons/main/png/bell.png</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+
+  <Config
+      Name="Config directory"
+      Target="/config"
+      Default="/mnt/user/appdata/bluos-doorbell/config"
+      Mode="ro"
+      Description="Folder holding config.yaml. Seed it from config.example.yaml in the repo."
+      Type="Path"
+      Display="always"
+      Required="true"
+      Mask="false">/mnt/user/appdata/bluos-doorbell/config</Config>
+
+  <Config
+      Name="Chimes directory"
+      Target="/chimes"
+      Default="/mnt/user/appdata/bluos-doorbell/chimes"
+      Mode="ro"
+      Description="Folder holding the chime audio. The players fetch these over HTTP from this service."
+      Type="Path"
+      Display="always"
+      Required="true"
+      Mask="false">/mnt/user/appdata/bluos-doorbell/chimes</Config>
+
+  <Config
+      Name="Config file path"
+      Target="DOORBELL_CONFIG"
+      Default="/config/config.yaml"
+      Mode=""
+      Description="Path to config.yaml inside the container. Leave as-is."
+      Type="Variable"
+      Display="advanced"
+      Required="false"
+      Mask="false">/config/config.yaml</Config>
+
+  <Config
+      Name="Chime directory path"
+      Target="DOORBELL_CHIME_DIR"
+      Default="/chimes"
+      Mode=""
+      Description="Path to the chimes folder inside the container. Leave as-is."
+      Type="Variable"
+      Display="advanced"
+      Required="false"
+      Mask="false">/chimes</Config>
+
+  <Config
+      Name="Timezone"
+      Target="TZ"
+      Default="America/Los_Angeles"
+      Mode=""
+      Description="Used for log timestamps only."
+      Type="Variable"
+      Display="advanced"
+      Required="false"
+      Mask="false">America/Los_Angeles</Config>
+</Container>

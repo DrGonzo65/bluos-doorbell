@@ -95,7 +95,7 @@ class Config(BaseModel):
     #: the players' VLAN. Auto-detected from the host's primary IP if unset.
     service_base_url: str = ""
     listen_host: str = "0.0.0.0"
-    listen_port: int = 8080
+    listen_port: int = 8095
 
     zones: list[ZoneConfig]
     chime: ChimeConfig = Field(default_factory=ChimeConfig)

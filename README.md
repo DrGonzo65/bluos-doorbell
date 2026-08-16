@@ -46,6 +46,9 @@ rather than starting a second capture.
 
 ## Setup
 
+Running on Unraid? See [`unraid/README.md`](unraid/README.md) — there's an
+install script, a Compose Manager file, and a Docker template.
+
 ```bash
 mkdir -p config
 cp config/config.example.yaml config/config.yaml
@@ -64,7 +67,7 @@ docker compose run --rm bluos-doorbell python -m tools.discover
 Then check the service sees everything correctly:
 
 ```bash
-curl -s http://<docker-host>:8080/inspect | jq
+curl -s http://<docker-host>:8095/inspect | jq
 ```
 
 `/inspect` shows each player's **own** volume, its group role, and the exact
@@ -75,7 +78,7 @@ restore logic covers all the sources you actually use.
 Fire the whole sequence by hand:
 
 ```bash
-curl -X POST "http://<docker-host>:8080/test/chime?token=<your-token>"
+curl -X POST "http://<docker-host>:8095/test/chime?token=<your-token>"
 ```
 
 ## Wiring up UniFi Protect
@@ -84,7 +87,7 @@ In the UniFi Protect app: **Alarm Manager → Create Alarm**
 
 - **Trigger:** Doorbell Ring, scoped to your doorbell camera
 - **Action:** Webhook
-- **URL:** `http://<docker-host>:8080/doorbell?token=<your-token>`
+- **URL:** `http://<docker-host>:8095/doorbell?token=<your-token>`
 - **Method:** POST
 
 Ring the doorbell once and check the container logs. If Protect can't reach the
@@ -148,11 +151,13 @@ player not blocking the rest.
 ## Layout
 
 ```
+app/__main__.py      entrypoint — binds host/port from config.yaml
 app/bluos.py         BluOS API client
 app/orchestrator.py  capture → duck → chime → restore
 app/config.py        config schema
 app/main.py          FastAPI service and webhook
 tools/discover.py    mDNS player discovery
+unraid/              install script, compose file, Unraid Docker template
 tests/               mock players and end-to-end tests
 chimes/doorbell.mp3  2.3s two-tone chime
 ```

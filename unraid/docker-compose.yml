@@ -1,0 +1,34 @@
+# Unraid variant of the compose file.
+#
+# Source lives wherever you cloned the repo; config and chimes live in appdata
+# so they survive an image rebuild. Create those first:
+#
+#   mkdir -p /mnt/user/appdata/bluos-doorbell/config /mnt/user/appdata/bluos-doorbell/chimes
+#
+# Then from the repo root:  docker compose -f unraid/docker-compose.yml up -d --build
+
+services:
+  bluos-doorbell:
+    build: ..
+    image: bluos-doorbell:latest
+    container_name: bluos-doorbell
+    restart: unless-stopped
+
+    # Host networking matters here for two reasons:
+    #   1. the players must be able to fetch the chime from this service
+    #   2. tools/discover.py uses mDNS, which does not cross a bridge network
+    network_mode: host
+
+    volumes:
+      - /mnt/user/appdata/bluos-doorbell/config:/config:ro
+      - /mnt/user/appdata/bluos-doorbell/chimes:/chimes:ro
+
+    environment:
+      DOORBELL_CONFIG: /config/config.yaml
+      DOORBELL_CHIME_DIR: /chimes
+      TZ: America/Los_Angeles
+
+    labels:
+      net.unraid.docker.managed: composeman
+      net.unraid.docker.webui: "http://[IP]:8095/health"
+      net.unraid.docker.icon: "https://raw.githubusercontent.com/selfhst/icons/main/png/bell.png"

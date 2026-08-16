@@ -9,7 +9,8 @@
 # the players are on a different VLAN.
 service_base_url: ""
 listen_host: "0.0.0.0"
-listen_port: 8080
+# 8080 collides with all sorts of things on an Unraid box, so the default is 8095.
+listen_port: 8095
 
 log_level: INFO
 
