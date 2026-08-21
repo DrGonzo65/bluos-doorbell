@@ -7,7 +7,8 @@ services:
 
     # Host networking matters here for two reasons:
     #   1. the players must be able to fetch the chime from this service
-    #   2. tools/discover.py uses mDNS, which does not cross a bridge network
+    #   2. discovery uses UDP broadcast (LSDP) and mDNS, neither of which
+    #      crosses a bridge network
     network_mode: host
 
     volumes:

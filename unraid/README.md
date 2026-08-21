@@ -11,8 +11,9 @@ The routes below build the image on the Unraid box instead. Useful for the
 first install before CI exists, or for testing a change without pushing.
 
 Whichever you pick, **host networking is required**. The Bluesound players have
-to reach this service to fetch the chime file, and `tools/discover.py` uses
-mDNS, which doesn't cross a bridge network.
+to reach this service to fetch the chime file, and discovery uses UDP broadcast
+(LSDP) plus mDNS, neither of which crosses a bridge network. The subnet-sweep
+fallback would still work on a bridge, but the chime fetch would not.
 
 ---
 
