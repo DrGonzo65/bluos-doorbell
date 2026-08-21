@@ -30,7 +30,9 @@ STARTER_CONFIG = """\
 # straight from Finder or Explorer at
 #     \\\\<tower>\\appdata\\bluos-doorbell\\config\\config.yaml
 #
-# Find your players' IPs in the BluOS app under Settings -> Player -> Network.
+# Find your players' IPs the easy way — open this in a browser:
+#     http://<host>:8095/discover?token=<your token>
+# or read them from the BluOS app under Settings -> Player -> Network.
 
 # URL the PLAYERS use to fetch the chime. Leave blank to auto-detect this
 # host's primary IP. Set it explicitly if the server is multi-homed or the

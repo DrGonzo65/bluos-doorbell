@@ -1,7 +1,8 @@
 # BluOS doorbell chime service — configuration
 #
 # Copy to config.yaml and edit. Find your players' IPs with:
-#   docker compose run --rm bluos-doorbell python -m tools.discover
+#   http://<host>:8095/discover?token=<your-token>     (browser, easiest)
+#   python -m tools.discover                            (on the host, not in a container)
 # or from the BluOS app: Settings -> Player -> Network.
 
 # URL the PLAYERS use to fetch the chime file. Leave blank to auto-detect the

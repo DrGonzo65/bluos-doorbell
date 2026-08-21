@@ -65,9 +65,24 @@ Find your players' IPs — easiest from a browser, no shell needed:
 http://<docker-host>:8095/discover?token=<your-token>
 ```
 
-Copy the `yaml` field straight into `config.yaml`. From a shell it's
-`python -m tools.discover`, and the BluOS app has them under
-Settings → Player → Network.
+Copy the `yaml` field straight into `config.yaml`.
+
+From a shell, run it **on the host, not in a container**:
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python -m tools.discover
+```
+
+Discovery uses UDP broadcast, which only reaches the LAN with real host
+networking. Docker Desktop on macOS and Windows doesn't provide that —
+containers there live in a Linux VM — so `docker compose run` will fall through
+to the subnet sweep at best. On Linux and Unraid, where host networking is real,
+`docker exec bluos-doorbell python -m tools.discover` works fine.
+
+The BluOS app also lists them under Settings → Player → Network, and a hand-typed
+IP works exactly as well as a discovered one.
 
 Then check the service sees everything correctly:
 

@@ -25,11 +25,23 @@ import socket
 import sys
 import time
 
+from pathlib import Path
+
 import httpx
 
 from . import lsdp
 
 BLUOS_PORT = 11000
+
+
+def in_container() -> bool:
+    """Best-effort: are we inside Docker?"""
+    if Path("/.dockerenv").exists():
+        return True
+    try:
+        return "docker" in Path("/proc/1/cgroup").read_text()
+    except OSError:
+        return False
 
 
 # --------------------------------------------------------------------------
@@ -241,6 +253,14 @@ def main() -> int:
     ip = primary_ip()
     subnet = args.subnet or ".".join(ip.split(".")[:3])
     print(f"This host: {ip}   sweeping subnet: {subnet}.0/24", file=sys.stderr)
+
+    if in_container():
+        print("\nRunning inside a container. Broadcast and mDNS only reach the\n"
+              "LAN when the container has real host networking — which Docker\n"
+              "Desktop on macOS and Windows does NOT provide (containers live in\n"
+              "a Linux VM). On those, run this on the host instead:\n"
+              "    pip install -r requirements.txt && python -m tools.discover\n"
+              "The subnet sweep below still works either way.", file=sys.stderr)
 
     lsdp_blocked = False
 
