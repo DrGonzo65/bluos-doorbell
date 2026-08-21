@@ -59,13 +59,15 @@ cp config/config.example.yaml config/config.yaml
 docker compose up -d --build
 ```
 
-Find your players' IPs:
+Find your players' IPs — easiest from a browser, no shell needed:
 
-```bash
-docker compose run --rm bluos-doorbell python -m tools.discover
+```
+http://<docker-host>:8095/discover?token=<your-token>
 ```
 
-(Or read them from the BluOS app: Settings → Player → Network.)
+Copy the `yaml` field straight into `config.yaml`. From a shell it's
+`python -m tools.discover`, and the BluOS app has them under
+Settings → Player → Network.
 
 Then check the service sees everything correctly:
 
@@ -108,6 +110,7 @@ can't ring the house by accident.
 | `POST /doorbell?token=…` | Webhook target. Also accepts GET. |
 | `GET /health` | Liveness, configured state, the build's git sha, and the last ring. |
 | `GET /inspect` | Per-player state, group topology, and restore plans. |
+| `GET /discover?token=…` | Find players on the LAN, returns a paste-ready `zones:` block. |
 | `POST /test/chime?token=…` | Run the full sequence, bypassing debounce. |
 | `GET /chimes/<file>` | Serves the chime to the players. |
 
@@ -159,7 +162,8 @@ app/bluos.py         BluOS API client
 app/orchestrator.py  capture → duck → chime → restore
 app/config.py        config schema
 app/main.py          FastAPI service and webhook
-tools/discover.py    mDNS player discovery
+tools/lsdp.py        Lenbrook Service Discovery Protocol (BluOS's own)
+tools/discover.py    player discovery: LSDP, then mDNS, then a subnet sweep
 app/bootstrap.py     first-run seeding of config.yaml and the default chime
 .github/workflows/   CI: run tests, publish the image to GHCR
 templates/           Unraid Docker template (also used for a CA listing)

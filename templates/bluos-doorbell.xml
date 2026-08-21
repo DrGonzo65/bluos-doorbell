@@ -11,9 +11,6 @@
   2. Via Community Applications, if you submit this repo to the public
      catalog at https://ca.unraid.net/submit (repo must be public + licensed).
 
-  IMPORTANT: the image path below is already set to your account.
-  GHCR paths are always lowercase even when your username isn't.
-
   With this pointing at a registry tag, Unraid's "Check for Updates" works
   normally: push to main, CI publishes, the Docker tab shows "update ready",
   you click Apply Update. Nothing about the source ever touches this host.

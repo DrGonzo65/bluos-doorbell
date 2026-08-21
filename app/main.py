@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -235,6 +236,63 @@ def _describe_restore(status) -> str:
         seek = f"&seek={status.secs}" if (status.can_seek and status.totlen) else ""
         return f"/Play?id={status.song}{seek}"
     return "unknown — check /inspect output against the API docs"
+
+
+@router.get("/discover")
+async def discover(
+    subnet: str | None = Query(default=None,
+                               description="first three octets, e.g. 192.168.1"),
+    token: str | None = Query(default=None),
+    x_doorbell_token: str | None = Header(default=None),
+):
+    """Find BluOS players on the LAN and return a paste-ready zones block.
+
+    Exists so you never need a shell: open this in a browser, copy the yaml
+    field into config.yaml, restart. Tries LSDP broadcast first, then falls
+    back to sweeping the subnet over HTTP, which works even when broadcast
+    and mDNS are blocked.
+    """
+    _check_token(token, x_doorbell_token)
+
+    from tools.discover import discover_lsdp, discover_sweep, primary_ip
+
+    ip = primary_ip()
+    subnet = subnet or ".".join(ip.split(".")[:3])
+
+    # LSDP is fast when it works, so try it before the 254-address sweep.
+    found, lsdp_error = await asyncio.to_thread(discover_lsdp, 3.0)
+    method = "lsdp"
+
+    if not found:
+        found = await discover_sweep(subnet)
+        method = "sweep"
+
+    players = [{"name": name, "host": host, "detail": model}
+               for host, name, model in found]
+
+    yaml_block = "zones:\n" + "".join(
+        f"  - name: {p['name']}\n    host: {p['host']}\n"
+        f"    # {p['detail']}\n" for p in players
+    ) if players else "zones: []"
+
+    hint = None
+    if not players:
+        hint = (f"Nothing answered on {subnet}.0/24. Check the subnet is right "
+                f"(this host is {ip}) and try /discover?subnet=x.y.z")
+    elif method == "sweep":
+        hint = ("Found by sweeping, not by broadcast — harmless, but it means "
+                "LSDP broadcast isn't reaching this host.")
+
+    return {
+        "method": method,
+        "subnet": f"{subnet}.0/24",
+        "this_host": ip,
+        "count": len(players),
+        "players": players,
+        "lsdp_error": lsdp_error,
+        "hint": hint,
+        "yaml": yaml_block,
+    }
 
 
 @router.post("/test/chime")

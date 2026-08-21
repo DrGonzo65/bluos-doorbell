@@ -113,3 +113,50 @@ identical end state — a GUI-managed container with working update checks.
 | Update button works | yes | yes | yes |
 
 Route 1 unless you specifically want to publish this for other people.
+
+---
+
+## Finding your players without a shell
+
+Once the container is up, open this in a browser:
+
+```
+http://<tower>:8095/discover?token=<your-token>
+```
+
+It returns a ready-to-paste `zones:` block. Copy it into `config.yaml` over the
+SMB share and restart the container.
+
+If it comes back with `count: 0`, the subnet guess was probably wrong — the
+response includes `this_host`, so try the matching range explicitly:
+
+```
+http://<tower>:8095/discover?token=<your-token>&subnet=192.168.1
+```
+
+### If discovery finds nothing anywhere
+
+Discovery is only a convenience — the service talks to players over ordinary
+HTTP, so a player that discovery can't see still works fine once you put its IP
+in `config.yaml` by hand. Get IPs from the BluOS app under
+**Settings → Player → Network**, and confirm reachability with:
+
+```bash
+curl http://<player-ip>:11000/SyncStatus
+```
+
+If that returns XML, you're done — paste the IP into the config regardless of
+what discovery says.
+
+Common reasons broadcast discovery comes back empty:
+
+- **macOS 15+ Local Network permission.** Terminal needs to be allowed under
+  System Settings → Privacy & Security → Local Network. Without it, multicast
+  and broadcast are silently dropped and every discovery tool returns nothing.
+- **BluOS doesn't reliably advertise over mDNS.** Bluesound uses their own
+  protocol (LSDP, UDP 11430), which is why a Bonjour browse can be empty with
+  players sitting right there. The tool tries LSDP first now.
+- **Client isolation / multicast filtering** on the WiFi SSID the players are
+  joined to. UniFi calls it "Client Device Isolation" and Multicast Enhancement.
+- **Different VLANs.** Broadcast and mDNS don't route. The subnet sweep still
+  works if the VLANs can reach each other over HTTP.

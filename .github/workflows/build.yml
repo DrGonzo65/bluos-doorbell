@@ -38,6 +38,9 @@ jobs:
       - name: First-run seeding tests
         run: python -m tests.test_bootstrap
 
+      - name: LSDP discovery protocol tests
+        run: python -m tests.test_lsdp
+
       - name: Validate the Unraid template and config sample
         run: |
           python -c "import xml.etree.ElementTree as ET; ET.parse('templates/bluos-doorbell.xml')"
