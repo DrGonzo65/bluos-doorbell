@@ -21,6 +21,13 @@ log = logging.getLogger("doorbell")
 
 CHIME_DIR = Path(os.environ.get("DOORBELL_CHIME_DIR", "/chimes"))
 
+#: Stamped into the image by CI. Lets you confirm which build is actually
+#: running after an update, rather than trusting that the pull took effect.
+BUILD = {
+    "git_sha": os.environ.get("DOORBELL_GIT_SHA", "dev"),
+    "built_at": os.environ.get("DOORBELL_BUILD_TIME", "unknown"),
+}
+
 state: dict[str, Any] = {}
 
 
@@ -42,7 +49,8 @@ async def lifespan(app: FastAPI):
         log.warning("chime file %s not found — the chime will fail until it exists",
                     chime_path)
 
-    log.info("BluOS doorbell service ready")
+    log.info("BluOS doorbell service ready (build %s, %s)",
+             BUILD["git_sha"][:12], BUILD["built_at"])
     log.info("  zones:     %s", ", ".join(z.name for z in config.enabled_zones()))
     log.info("  chime url: %s", config.chime_url())
     log.info("  webhook:   %s/doorbell", config.resolved_base_url())
@@ -142,6 +150,7 @@ async def health():
     orch = _orchestrator()
     return {
         "status": "ok",
+        "build": BUILD,
         "zones": len(_config().enabled_zones()),
         "chime_url": _config().chime_url(),
         "last_result": orch.last_result.as_dict() if orch.last_result else None,

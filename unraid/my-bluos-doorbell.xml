@@ -6,13 +6,17 @@
   then in the Unraid GUI: Docker -> Add Container -> select "bluos-doorbell"
   from the Template dropdown.
 
-  Assumes the image has already been built locally:
-      docker build -t bluos-doorbell:latest /path/to/repo
+  IMPORTANT: replace OWNER below with your GitHub username, lowercase.
+  GHCR paths are always lowercase even when your username isn't.
+
+  With this pointing at a registry tag, Unraid's "Check for Updates" works
+  normally: push to main, CI publishes, the Docker tab shows "update ready",
+  you click Apply Update. Nothing about the source ever touches this host.
 -->
 <Container version="2">
   <Name>bluos-doorbell</Name>
-  <Repository>bluos-doorbell:latest</Repository>
-  <Registry/>
+  <Repository>ghcr.io/OWNER/bluos-doorbell:latest</Repository>
+  <Registry>https://ghcr.io/OWNER/bluos-doorbell</Registry>
   <Network>host</Network>
   <MyIP/>
   <Shell>bash</Shell>
@@ -33,6 +37,11 @@
     fetch the chime file.
 
     Edit config.yaml in the config folder, then restart the container.
+
+    Updates: push to main, CI publishes to GHCR, then Check for Updates and
+    Apply Update here. Config and chimes live in appdata, so an update never
+    touches them. Confirm what is running at http://[IP]:8095/health — it
+    reports the git sha of the build.
   </Overview>
   <Category>HomeAutomation: Other:</Category>
   <WebUI>http://[IP]:8095/health</WebUI>

@@ -1,0 +1,31 @@
+# Pull the prebuilt image from GHCR — no source needed on the Unraid box.
+#
+# Replace OWNER with your GitHub username (lowercase; GHCR paths are always
+# lowercase even if your username isn't).
+#
+#   docker compose -f unraid/docker-compose.ghcr.yml pull
+#   docker compose -f unraid/docker-compose.ghcr.yml up -d
+
+services:
+  bluos-doorbell:
+    image: ghcr.io/OWNER/bluos-doorbell:latest
+    container_name: bluos-doorbell
+    restart: unless-stopped
+
+    # Host networking matters here for two reasons:
+    #   1. the players must be able to fetch the chime from this service
+    #   2. tools/discover.py uses mDNS, which does not cross a bridge network
+    network_mode: host
+
+    volumes:
+      - /mnt/user/appdata/bluos-doorbell/config:/config:ro
+      - /mnt/user/appdata/bluos-doorbell/chimes:/chimes:ro
+
+    environment:
+      DOORBELL_CONFIG: /config/config.yaml
+      DOORBELL_CHIME_DIR: /chimes
+      TZ: America/Los_Angeles
+
+    labels:
+      net.unraid.docker.managed: composeman
+      net.unraid.docker.webui: "http://[IP]:8095/health"

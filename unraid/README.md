@@ -1,7 +1,11 @@
 # Running on Unraid
 
-Three routes. Pick one — the script is the fastest, Compose Manager is the
-tidiest if you already use it, the template is for GUI-only management.
+**For the ongoing update flow, see [UPDATING.md](UPDATING.md)** — GitHub Actions
+publishes an image to GHCR and Unraid pulls it, so no source lands on the host
+and updates are one click on the Docker tab. That's the recommended setup.
+
+The routes below build the image on the Unraid box instead. Useful for the
+first install before CI exists, or for testing a change without pushing.
 
 Whichever you pick, **host networking is required**. The Bluesound players have
 to reach this service to fetch the chime file, and `tools/discover.py` uses
