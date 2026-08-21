@@ -17,7 +17,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app/ ./app/
 COPY tools/ ./tools/
 
-ENV DOORBELL_CONFIG=/config/config.yaml \
+# Seeded into the mounted volumes on first run, so a GUI-only install
+# (Unraid template / Community Apps) never needs shell access.
+COPY chimes/ ./defaults/chimes/
+
+ENV DOORBELL_DEFAULTS=/srv/defaults \
+    DOORBELL_CONFIG=/config/config.yaml \
     DOORBELL_CHIME_DIR=/chimes \
     DOORBELL_GIT_SHA=${GIT_SHA} \
     DOORBELL_BUILD_TIME=${BUILD_TIME} \

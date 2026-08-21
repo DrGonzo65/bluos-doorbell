@@ -51,7 +51,11 @@ async def lifespan(app: FastAPI):
 
     log.info("BluOS doorbell service ready (build %s, %s)",
              BUILD["git_sha"][:12], BUILD["built_at"])
-    log.info("  zones:     %s", ", ".join(z.name for z in config.enabled_zones()))
+    if config.is_configured:
+        log.info("  zones:     %s", ", ".join(z.name for z in config.enabled_zones()))
+    else:
+        log.warning("  NO ZONES CONFIGURED — edit config.yaml and restart. "
+                    "Nothing will chime until you do.")
     log.info("  chime url: %s", config.chime_url())
     log.info("  webhook:   %s/doorbell", config.resolved_base_url())
     if not config.webhook.token:
@@ -149,8 +153,9 @@ async def doorbell(
 async def health():
     orch = _orchestrator()
     return {
-        "status": "ok",
+        "status": "ok" if _config().is_configured else "unconfigured",
         "build": BUILD,
+        "configured": _config().is_configured,
         "zones": len(_config().enabled_zones()),
         "chime_url": _config().chime_url(),
         "last_result": orch.last_result.as_dict() if orch.last_result else None,

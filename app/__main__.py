@@ -8,26 +8,42 @@ default 8080 usually collides with something else.
 
 from __future__ import annotations
 
+import os
 import sys
+from pathlib import Path
 
 import uvicorn
 
-from .config import load_config
+from . import bootstrap
+from .config import Config, load_config
 
 
 def main() -> int:
+    # Seed a starter config and the default chime if this is a fresh install,
+    # so a GUI-only install never needs a shell.
+    bootstrap.run(
+        Path(os.environ.get("DOORBELL_CONFIG", "/config/config.yaml")),
+        Path(os.environ.get("DOORBELL_CHIME_DIR", "/chimes")),
+    )
+
     try:
         config = load_config()
-    except FileNotFoundError as exc:
-        print(f"error: {exc}", file=sys.stderr)
+    except FileNotFoundError:
+        # Seeding failed, which almost always means /config is mounted
+        # read-only. Start anyway so /health and the logs can say so — a
+        # crash-looping container is undebuggable without a shell.
         print(
-            "\nOn Unraid, map a host folder to /config and put config.yaml in it:\n"
-            "  /mnt/user/appdata/bluos-doorbell/config  ->  /config",
+            "error: no config.yaml and could not create one.\n"
+            "The /config mount is probably read-only. On Unraid, edit the\n"
+            "container and set the config path's Access Mode to Read/Write.\n"
+            "Starting unconfigured so this message stays visible.",
             file=sys.stderr,
         )
-        return 1
+        config = Config()
     except Exception as exc:  # noqa: BLE001 - config errors should be readable
         print(f"error: config is invalid: {exc}", file=sys.stderr)
+        print("Fix config.yaml and restart. Nothing else will work until then.",
+              file=sys.stderr)
         return 1
 
     uvicorn.run(

@@ -1,5 +1,8 @@
 # Running on Unraid
 
+**Start with [INSTALLING.md](INSTALLING.md)** — installing from the Unraid GUI
+with no shell access at all, which is what you want for a first install.
+
 **For the ongoing update flow, see [UPDATING.md](UPDATING.md)** — GitHub Actions
 publishes an image to GHCR and Unraid pulls it, so no source lands on the host
 and updates are one click on the Docker tab. That's the recommended setup.
@@ -61,12 +64,12 @@ Build the image first, then install the template:
 
 ```bash
 docker build -t bluos-doorbell:latest /path/to/repo
-cp unraid/my-bluos-doorbell.xml /boot/config/plugins/dockerMan/templates-user/
+cp templates/bluos-doorbell.xml /boot/config/plugins/dockerMan/templates-user/
 ```
 
 Docker tab → **Add Container** → pick `bluos-doorbell` from the Template
-dropdown. The appdata paths are pre-filled; you still need to put `config.yaml`
-and the chime in those folders yourself.
+dropdown. The appdata paths are pre-filled, and the container seeds its own
+`config.yaml` and chime on first run — leave those folders empty.
 
 Note this route doesn't rebuild the image for you. After changing the code,
 re-run `docker build` and hit **Force Update** in the GUI.

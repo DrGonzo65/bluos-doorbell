@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 
 class ZoneConfig(BaseModel):
@@ -97,19 +97,19 @@ class Config(BaseModel):
     listen_host: str = "0.0.0.0"
     listen_port: int = 8095
 
-    zones: list[ZoneConfig]
+    zones: list[ZoneConfig] = Field(default_factory=list)
     chime: ChimeConfig = Field(default_factory=ChimeConfig)
     behaviour: BehaviourConfig = Field(default_factory=BehaviourConfig)
     webhook: WebhookConfig = Field(default_factory=WebhookConfig)
 
     log_level: str = "INFO"
 
-    @field_validator("zones")
-    @classmethod
-    def _at_least_one_zone(cls, v: list[ZoneConfig]) -> list[ZoneConfig]:
-        if not v:
-            raise ValueError("at least one zone must be configured")
-        return v
+    #: Zero zones is legal: a freshly seeded config has none yet. The service
+    #: stays up and reports unconfigured rather than crash-looping, which
+    #: matters when the only way in is the Unraid GUI.
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.enabled_zones())
 
     def enabled_zones(self) -> list[ZoneConfig]:
         return [z for z in self.zones if z.enabled]

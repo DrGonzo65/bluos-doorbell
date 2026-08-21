@@ -64,8 +64,8 @@ mkdir -p /mnt/user/appdata/bluos-doorbell/config /mnt/user/appdata/bluos-doorbel
 Then either the template (GUI) or compose:
 
 ```bash
-# GUI route — edit OWNER in the file first
-cp unraid/my-bluos-doorbell.xml /boot/config/plugins/dockerMan/templates-user/
+# GUI route — edit OWNER in the file first (or see INSTALLING.md, no SSH)
+cp templates/bluos-doorbell.xml /boot/config/plugins/dockerMan/templates-user/
 # Docker tab -> Add Container -> pick bluos-doorbell from the Template dropdown
 
 # or compose route — edit OWNER in the file first

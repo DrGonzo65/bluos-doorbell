@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Community Applications repository profile.
+
+  Only needed if you submit this repo to the public CA catalog at
+  https://ca.unraid.net/submit — which requires the repo to be PUBLIC and
+  carry an OSI-approved licence (see LICENSE).
+
+  Replace OWNER with your GitHub username throughout. The submission portal
+  runs a live scan that parses this file and the templates and reports
+  anything it doesn't like, so validate there before submitting rather than
+  trusting this scaffold.
+-->
+<Profile>
+  <Repo>BluOS Doorbell</Repo>
+  <Author>OWNER</Author>
+  <Language>en_US</Language>
+  <Web>https://github.com/OWNER/bluos-doorbell</Web>
+  <Support>https://github.com/OWNER/bluos-doorbell/issues</Support>
+  <ProfileImage>https://raw.githubusercontent.com/selfhst/icons/main/png/bell.png</ProfileImage>
+  <Overview>
+    Doorbell chime for Bluesound BluOS players, driven by a UniFi Protect
+    webhook. Ducks the music, plays a chime, and restores the exact prior
+    volume and source in every zone — including across grouped players, which
+    is where the stock integrations get it wrong.
+  </Overview>
+</Profile>

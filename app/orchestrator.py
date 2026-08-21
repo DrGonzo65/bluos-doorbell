@@ -95,6 +95,12 @@ class DoorbellOrchestrator:
     # -- public entry point ---------------------------------------------------
 
     async def ring(self, source: str = "manual") -> RingResult:
+        if not self.config.is_configured:
+            log.warning("ring from %s ignored — no zones configured yet. Edit "
+                        "config.yaml and restart.", source)
+            return RingResult(status="error",
+                              errors=["no zones configured — edit config.yaml"])
+
         now = time.monotonic()
 
         async with self._gate:

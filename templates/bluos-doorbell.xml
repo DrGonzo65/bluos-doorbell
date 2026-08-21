@@ -2,9 +2,14 @@
 <!--
   Unraid Docker template.
 
-  Copy to /boot/config/plugins/dockerMan/templates-user/my-bluos-doorbell.xml
-  then in the Unraid GUI: Docker -> Add Container -> select "bluos-doorbell"
-  from the Template dropdown.
+  Two ways to use this file:
+
+  1. By hand, no SSH: drop it on the flash share over SMB at
+     \\<tower>\flash\config\plugins\dockerMan\templates-user\
+     then Docker -> Add Container -> pick it from the Template dropdown.
+
+  2. Via Community Applications, if you submit this repo to the public
+     catalog at https://ca.unraid.net/submit (repo must be public + licensed).
 
   IMPORTANT: replace OWNER below with your GitHub username, lowercase.
   GHCR paths are always lowercase even when your username isn't.
@@ -21,8 +26,8 @@
   <MyIP/>
   <Shell>bash</Shell>
   <Privileged>false</Privileged>
-  <Support/>
-  <Project/>
+  <Support>https://github.com/OWNER/bluos-doorbell/issues</Support>
+  <Project>https://github.com/OWNER/bluos-doorbell</Project>
   <Overview>
     Plays a doorbell chime on Bluesound BluOS players and restores the exact
     prior volume and source afterwards, including when players are grouped.
@@ -45,7 +50,7 @@
   </Overview>
   <Category>HomeAutomation: Other:</Category>
   <WebUI>http://[IP]:8095/health</WebUI>
-  <TemplateURL/>
+  <TemplateURL>https://raw.githubusercontent.com/OWNER/bluos-doorbell/main/templates/bluos-doorbell.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/selfhst/icons/main/png/bell.png</Icon>
   <ExtraParams/>
   <PostArgs/>
@@ -59,8 +64,8 @@
       Name="Config directory"
       Target="/config"
       Default="/mnt/user/appdata/bluos-doorbell/config"
-      Mode="ro"
-      Description="Folder holding config.yaml. Seed it from config.example.yaml in the repo."
+      Mode="rw"
+      Description="Folder for config.yaml. Leave it empty on first run — the container writes a starter config here, which you then edit and restart."
       Type="Path"
       Display="always"
       Required="true"
@@ -70,8 +75,8 @@
       Name="Chimes directory"
       Target="/chimes"
       Default="/mnt/user/appdata/bluos-doorbell/chimes"
-      Mode="ro"
-      Description="Folder holding the chime audio. The players fetch these over HTTP from this service."
+      Mode="rw"
+      Description="Folder for chime audio. Leave it empty on first run — the default chime is installed here automatically."
       Type="Path"
       Display="always"
       Required="true"

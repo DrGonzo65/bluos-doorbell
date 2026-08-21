@@ -46,9 +46,11 @@ rather than starting a second capture.
 
 ## Setup
 
-Running on Unraid? See [`unraid/README.md`](unraid/README.md) to install, and
-[`unraid/UPDATING.md`](unraid/UPDATING.md) for the update flow — CI publishes an
-image to GHCR and the box pulls it, so updating is one click on the Docker tab.
+Running on Unraid? [`unraid/INSTALLING.md`](unraid/INSTALLING.md) covers a
+GUI-only install with no shell access, and [`unraid/UPDATING.md`](unraid/UPDATING.md)
+the update flow — CI publishes an image to GHCR and the box pulls it, so updating
+is one click on the Docker tab. The container seeds its own config and chime on
+first run.
 
 ```bash
 mkdir -p config
@@ -104,7 +106,7 @@ can't ring the house by accident.
 | Endpoint | Purpose |
 |---|---|
 | `POST /doorbell?token=…` | Webhook target. Also accepts GET. |
-| `GET /health` | Liveness, the running build's git sha, and the last ring's result. |
+| `GET /health` | Liveness, configured state, the build's git sha, and the last ring. |
 | `GET /inspect` | Per-player state, group topology, and restore plans. |
 | `POST /test/chime?token=…` | Run the full sequence, bypassing debounce. |
 | `GET /chimes/<file>` | Serves the chime to the players. |
@@ -158,8 +160,10 @@ app/orchestrator.py  capture → duck → chime → restore
 app/config.py        config schema
 app/main.py          FastAPI service and webhook
 tools/discover.py    mDNS player discovery
+app/bootstrap.py     first-run seeding of config.yaml and the default chime
 .github/workflows/   CI: run tests, publish the image to GHCR
-unraid/              install, update, compose files, and the Docker template
+templates/           Unraid Docker template (also used for a CA listing)
+unraid/              install and update guides, compose files, scripts
 tests/               mock players and end-to-end tests
 chimes/doorbell.mp3  2.3s two-tone chime
 ```

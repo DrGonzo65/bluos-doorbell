@@ -46,8 +46,8 @@ docker run -d \
     -e TZ="${TZ:-America/Los_Angeles}" \
     -l net.unraid.docker.managed=dockerman \
     -l net.unraid.docker.webui='http://[IP]:8095/health' \
-    -v "$APPDATA/config:/config:ro" \
-    -v "$APPDATA/chimes:/chimes:ro" \
+    -v "$APPDATA/config:/config" \
+    -v "$APPDATA/chimes:/chimes" \
     "$IMAGE" >/dev/null
 
 PORT="$(grep -E '^listen_port:' "$APPDATA/config/config.yaml" 2>/dev/null | awk '{print $2}' | tr -d '"')"
