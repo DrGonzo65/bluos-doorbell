@@ -19,7 +19,7 @@ No files to copy anywhere. Unraid writes the template for you.
 | Field | Value |
 |---|---|
 | Name | `bluos-doorbell` |
-| Repository | `ghcr.io/OWNER/bluos-doorbell:latest` |
+| Repository | `ghcr.io/drgonzo65/bluos-doorbell:latest` |
 | Network Type | **Host** |
 | WebUI | `http://[IP]:8095/health` |
 
@@ -57,9 +57,7 @@ saves what you entered as a private template, so this is a one-time setup.
 Same result as Route 1, but the fields come pre-filled. Still no SSH — the
 flash drive is an SMB share too.
 
-1. Edit `templates/bluos-doorbell.xml`, replacing `OWNER` with your GitHub
-   username (lowercase).
-2. Copy it in Finder to:
+1. Copy `templates/bluos-doorbell.xml` in Finder to:
    ```
    \\<tower>\flash\config\plugins\dockerMan\templates-user\
    ```
@@ -92,11 +90,10 @@ other BluOS-plus-Unraid owners to find and use this.
 If you do go that way:
 
 1. Make the repo public, and the GHCR package public.
-2. Replace `OWNER` in `ca_profile.xml` and `templates/bluos-doorbell.xml`.
-3. Run the live scan at [ca.unraid.net/submit](https://ca.unraid.net/submit)
+2. Run the live scan at [ca.unraid.net/submit](https://ca.unraid.net/submit)
    and fix whatever it reports. Treat the portal as the authority on format —
    the scaffolding here is a starting point, not a guarantee.
-4. Submit and wait for it to land in the catalogue.
+3. Submit and wait for it to land in the catalogue.
 
 What that buys you over Route 1: discoverability for other people, and a
 one-click install on any future Unraid box. What it costs: publishing the

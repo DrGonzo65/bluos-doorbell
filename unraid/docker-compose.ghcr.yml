@@ -1,14 +1,11 @@
 # Pull the prebuilt image from GHCR — no source needed on the Unraid box.
 #
-# Replace OWNER with your GitHub username (lowercase; GHCR paths are always
-# lowercase even if your username isn't).
-#
 #   docker compose -f unraid/docker-compose.ghcr.yml pull
 #   docker compose -f unraid/docker-compose.ghcr.yml up -d
 
 services:
   bluos-doorbell:
-    image: ghcr.io/OWNER/bluos-doorbell:latest
+    image: ghcr.io/drgonzo65/bluos-doorbell:latest
     container_name: bluos-doorbell
     restart: unless-stopped
 

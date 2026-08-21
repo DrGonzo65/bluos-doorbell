@@ -6,17 +6,16 @@
   https://ca.unraid.net/submit — which requires the repo to be PUBLIC and
   carry an OSI-approved licence (see LICENSE).
 
-  Replace OWNER with your GitHub username throughout. The submission portal
-  runs a live scan that parses this file and the templates and reports
+  The submission portal runs a live scan that parses this file and the templates and reports
   anything it doesn't like, so validate there before submitting rather than
   trusting this scaffold.
 -->
 <Profile>
   <Repo>BluOS Doorbell</Repo>
-  <Author>OWNER</Author>
+  <Author>DrGonzo65</Author>
   <Language>en_US</Language>
-  <Web>https://github.com/OWNER/bluos-doorbell</Web>
-  <Support>https://github.com/OWNER/bluos-doorbell/issues</Support>
+  <Web>https://github.com/DrGonzo65/bluos-doorbell</Web>
+  <Support>https://github.com/DrGonzo65/bluos-doorbell/issues</Support>
   <ProfileImage>https://raw.githubusercontent.com/selfhst/icons/main/png/bell.png</ProfileImage>
   <Overview>
     Doorbell chime for Bluesound BluOS players, driven by a UniFi Protect

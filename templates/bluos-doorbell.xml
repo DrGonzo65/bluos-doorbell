@@ -11,7 +11,7 @@
   2. Via Community Applications, if you submit this repo to the public
      catalog at https://ca.unraid.net/submit (repo must be public + licensed).
 
-  IMPORTANT: replace OWNER below with your GitHub username, lowercase.
+  IMPORTANT: the image path below is already set to your account.
   GHCR paths are always lowercase even when your username isn't.
 
   With this pointing at a registry tag, Unraid's "Check for Updates" works
@@ -20,14 +20,14 @@
 -->
 <Container version="2">
   <Name>bluos-doorbell</Name>
-  <Repository>ghcr.io/OWNER/bluos-doorbell:latest</Repository>
-  <Registry>https://ghcr.io/OWNER/bluos-doorbell</Registry>
+  <Repository>ghcr.io/drgonzo65/bluos-doorbell:latest</Repository>
+  <Registry>https://ghcr.io/drgonzo65/bluos-doorbell</Registry>
   <Network>host</Network>
   <MyIP/>
   <Shell>bash</Shell>
   <Privileged>false</Privileged>
-  <Support>https://github.com/OWNER/bluos-doorbell/issues</Support>
-  <Project>https://github.com/OWNER/bluos-doorbell</Project>
+  <Support>https://github.com/DrGonzo65/bluos-doorbell/issues</Support>
+  <Project>https://github.com/DrGonzo65/bluos-doorbell</Project>
   <Overview>
     Plays a doorbell chime on Bluesound BluOS players and restores the exact
     prior volume and source afterwards, including when players are grouped.
@@ -50,7 +50,7 @@
   </Overview>
   <Category>HomeAutomation: Other:</Category>
   <WebUI>http://[IP]:8095/health</WebUI>
-  <TemplateURL>https://raw.githubusercontent.com/OWNER/bluos-doorbell/main/templates/bluos-doorbell.xml</TemplateURL>
+  <TemplateURL>https://raw.githubusercontent.com/DrGonzo65/bluos-doorbell/main/templates/bluos-doorbell.xml</TemplateURL>
   <Icon>https://raw.githubusercontent.com/selfhst/icons/main/png/bell.png</Icon>
   <ExtraParams/>
   <PostArgs/>

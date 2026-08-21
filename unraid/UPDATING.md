@@ -5,14 +5,11 @@ on every push to `main` and publishes it to GHCR; Unraid pulls that image.
 
 ```
   Mac                GitHub                     GHCR              Unraid
-  git push  ──▶  test, then build  ──▶  ghcr.io/OWNER/...  ──▶  Apply Update
+  git push  ──▶  test, then build  ──▶  ghcr.io/drgonzo65/...  ──▶  Apply Update
 ```
 
 Config and chimes live in `/mnt/user/appdata/bluos-doorbell/`, mounted into the
 container. An update replaces the code and never touches them.
-
-Replace `OWNER` throughout with your GitHub username, **lowercase** — GHCR paths
-are always lowercase even when your username isn't.
 
 ---
 
@@ -64,11 +61,11 @@ mkdir -p /mnt/user/appdata/bluos-doorbell/config /mnt/user/appdata/bluos-doorbel
 Then either the template (GUI) or compose:
 
 ```bash
-# GUI route — edit OWNER in the file first (or see INSTALLING.md, no SSH)
+# GUI route (or see INSTALLING.md for the no-SSH version)
 cp templates/bluos-doorbell.xml /boot/config/plugins/dockerMan/templates-user/
 # Docker tab -> Add Container -> pick bluos-doorbell from the Template dropdown
 
-# or compose route — edit OWNER in the file first
+# or compose route
 docker compose -f unraid/docker-compose.ghcr.yml up -d
 ```
 
@@ -92,7 +89,7 @@ That's it. Same one-click flow as every other container on the box.
 Prefer the CLI:
 
 ```bash
-OWNER=yourname bash unraid/update.sh
+bash unraid/update.sh
 ```
 
 It pulls, skips the restart entirely if the image is unchanged, recreates the
@@ -118,7 +115,7 @@ didn't take — usually a cached `latest` or the container wasn't recreated.
 
 Every build is also tagged with its short sha, so a bad update is one edit away
 from undone. Change the Repository field in the Unraid container to
-`ghcr.io/OWNER/bluos-doorbell:sha-abc1234` and apply. Tag releases if you'd
+`ghcr.io/drgonzo65/bluos-doorbell:sha-abc1234` and apply. Tag releases if you'd
 rather pin to versions:
 
 ```bash
