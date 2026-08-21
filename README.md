@@ -4,6 +4,8 @@ A small service that plays a doorbell chime on Bluesound Node players and then
 puts everything back *exactly* the way it was — the right volume in every zone,
 the right track at the right position — including when players are grouped.
 
+It finds the players itself. There is no list of IP addresses to maintain.
+
 Triggered by a UniFi Protect Alarm Manager webhook. No Control4 involvement.
 
 ## Why this exists
@@ -32,7 +34,7 @@ rather than starting a second capture.
 
 ## What it does, per ring
 
-1. Reads `/SyncStatus` on every configured player and resolves group topology.
+1. Reads `/SyncStatus` on every known player and resolves group topology.
 2. Captures `/Status` on each group primary and `/Volume` on every individual
    member.
 3. Ramps each member down to its chime volume (`tell_slaves=0`).
@@ -53,36 +55,18 @@ is one click on the Docker tab. The container seeds its own config and chime on
 first run.
 
 ```bash
-mkdir -p config
-cp config/config.example.yaml config/config.yaml
-# edit config/config.yaml — at minimum, the zone IPs and the webhook token
 docker compose up -d --build
 ```
 
-Find your players' IPs — easiest from a browser, no shell needed:
+That's the whole setup. The container writes its own `config.yaml`, finds every
+BluOS player on the network, and chimes in all of them. Set a webhook token in
+the config and you're done — there are no IP addresses to enter.
+
+See what it found:
 
 ```
 http://<docker-host>:8095/discover?token=<your-token>
 ```
-
-Copy the `yaml` field straight into `config.yaml`.
-
-From a shell, run it **on the host, not in a container**:
-
-```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python -m tools.discover
-```
-
-Discovery uses UDP broadcast, which only reaches the LAN with real host
-networking. Docker Desktop on macOS and Windows doesn't provide that —
-containers there live in a Linux VM — so `docker compose run` will fall through
-to the subnet sweep at best. On Linux and Unraid, where host networking is real,
-`docker exec bluos-doorbell python -m tools.discover` works fine.
-
-The BluOS app also lists them under Settings → Player → Network, and a hand-typed
-IP works exactly as well as a discovered one.
 
 Then check the service sees everything correctly:
 
@@ -123,11 +107,50 @@ can't ring the house by accident.
 | Endpoint | Purpose |
 |---|---|
 | `POST /doorbell?token=…` | Webhook target. Also accepts GET. |
-| `GET /health` | Liveness, configured state, the build's git sha, and the last ring. |
+| `GET /health` | Liveness, discovered players, the build's git sha, and the last ring. |
 | `GET /inspect` | Per-player state, group topology, and restore plans. |
-| `GET /discover?token=…` | Find players on the LAN, returns a paste-ready `zones:` block. |
+| `GET /discover?token=…` | What discovery currently knows. `?rescan=1` forces a fresh scan. |
 | `POST /test/chime?token=…` | Run the full sequence, bypassing debounce. |
 | `GET /chimes/<file>` | Serves the chime to the players. |
+
+## Discovery
+
+On by default. The service keeps a live picture of the network from three
+sources, cheapest first:
+
+- a **passive listener** on udp/11430 — BluOS players announce themselves about
+  every 57 seconds, so a newly plugged-in player is picked up within a minute
+- a **periodic LSDP query** asking everything to announce now
+- a **subnet sweep** over HTTP when the first two come back empty, and
+  occasionally afterwards to catch players whose broadcasts don't reach the
+  server
+
+Players that stop answering for 15 minutes are dropped; renames are picked up
+automatically. `GET /health` shows what's known and how each was found.
+
+`zones:` in `config.yaml` is for **exceptions only** — you never list players
+just to include them:
+
+```yaml
+discovery:
+  exclude: ["Garage"]           # never chime here
+
+zones:
+  - name: Primary Bedroom       # matched by name, everything else stays automatic
+    chime_when_idle: false
+    chime_volume: 20
+
+  - name: Back Deck             # a player discovery can't see, pinned by hand
+    host: 192.168.1.60
+```
+
+Set `discovery.auto: false` to ignore the network entirely and use only the
+zones you list.
+
+If discovery finds nothing, the subnet guess is the usual cause —
+`/health` reports the host address it derived, and `discovery.subnet` overrides
+it. Discovery needs host networking; on a bridge network the sweep still works
+but players can't fetch the chime, so host networking is required regardless.
 
 ## Tuning
 
@@ -141,6 +164,7 @@ The settings you'll actually touch are in `config.yaml`:
 - **`behaviour.fade_ms`** — 300ms feels intentional; 0 is a hard cut.
 - **`behaviour.debounce_seconds`** — rings inside this window are ignored.
 - **`chime_when_idle: false`** — per zone, so a silent bedroom stays silent.
+- **`discovery.exclude`** — players that should never chime.
 
 ## Known limits
 
@@ -163,8 +187,9 @@ service makes. Set `group_policy: skip` if you'd rather leave such groups alone.
 python -m tests.test_sequence
 ```
 
-Runs the full choreography against mock BluOS players that reproduce the real
-quirks — secondaries mirroring the primary's `/Status`, transport commands
+Four suites cover the choreography, first-run seeding, the LSDP wire format, and
+the discovery/override merge. The main one runs the full choreography against
+mock BluOS players that reproduce the real quirks — secondaries mirroring the primary's `/Status`, transport commands
 proxying to the primary. Covers queue restore with seek, grouped save/restore,
 double-press, radio streams, idle opt-out, fixed-volume players, and one dead
 player not blocking the rest.
@@ -177,6 +202,7 @@ app/bluos.py         BluOS API client
 app/orchestrator.py  capture → duck → chime → restore
 app/config.py        config schema
 app/main.py          FastAPI service and webhook
+app/discovery.py     live player registry: listener, refresh, override merge
 tools/lsdp.py        Lenbrook Service Discovery Protocol (BluOS's own)
 tools/discover.py    player discovery: LSDP, then mDNS, then a subnet sweep
 app/bootstrap.py     first-run seeding of config.yaml and the default chime

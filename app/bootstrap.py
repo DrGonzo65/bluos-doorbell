@@ -23,41 +23,56 @@ DEFAULTS_DIR = Path(os.environ.get("DOORBELL_DEFAULTS", "/srv/defaults"))
 STARTER_CONFIG = """\
 # BluOS doorbell — configuration
 #
-# This file was created automatically on first run. Fill in your players and
-# a webhook token, then restart the container.
+# This file was created automatically on first run.
+#
+# You probably don't need to change anything except the webhook token. The
+# service finds your players by itself and chimes in all of them.
 #
 # Editing without SSH: this file lives on the appdata share, so you can open it
 # straight from Finder or Explorer at
 #     \\\\<tower>\\appdata\\bluos-doorbell\\config\\config.yaml
 #
-# Find your players' IPs the easy way — open this in a browser:
-#     http://<host>:8095/discover?token=<your token>
-# or read them from the BluOS app under Settings -> Player -> Network.
+# See what was found:  http://<host>:8095/discover?token=<your token>
 
-# URL the PLAYERS use to fetch the chime. Leave blank to auto-detect this
-# host's primary IP. Set it explicitly if the server is multi-homed or the
-# players sit on a different VLAN.
-service_base_url: ""
-listen_host: "0.0.0.0"
-# 8080 collides with all sorts of things on an Unraid box, so the default is 8095.
-listen_port: 8095
+webhook:
+  # Shared secret. UniFi Protect sends it as ?token=... on the webhook URL.
+  # Change this. Leave blank only on a trusted VLAN.
+  token: "change-me"
 
-log_level: INFO
+  # Optional allowlist so only your front door can ring, matched as a
+  # case-insensitive substring against the Protect payload.
+  allowed_devices: []
+    # - "Front Door"
 
-# Each entry is one player that should chime. The service works out grouping
-# on its own — list the rooms you want, not the group structure.
+discovery:
+  # Find players automatically. Set false to use only the zones listed below.
+  auto: true
+
+  # Subnet to sweep, e.g. "192.168.1". Blank = derive it from this host.
+  # Set it if your server has several interfaces and picks the wrong one.
+  subnet: ""
+
+  # How often to re-check. New or renamed players appear within this window;
+  # a player that broadcasts its presence is noticed within about a minute.
+  refresh_seconds: 300
+
+  # Never chime these, by name or IP.
+  exclude: []
+    # - "Garage"
+    # - 192.168.1.60
+
+# Only needed to override a discovered player. Match by name or host and set
+# just the fields you want changed — everything else stays automatic.
 zones: []
-  # - name: Kitchen
-  #   host: 192.168.1.51
-  #   chime_volume: 35          # optional, overrides chime.default_volume
-  #
-  # - name: Living Room
-  #   host: 192.168.1.52
-  #
   # - name: Primary Bedroom
-  #   host: 192.168.1.54
-  #   chime_when_idle: false    # don't wake a silent bedroom
+  #   chime_when_idle: false    # don't wake a silent room
   #   chime_volume: 20
+  #
+  # - name: Garage
+  #   enabled: false            # never chime here
+  #
+  # - name: Back Deck           # a player discovery can't see, pinned by hand
+  #   host: 192.168.1.60
 
 chime:
   file: doorbell.mp3
@@ -86,15 +101,13 @@ behaviour:
   restore_pause_state: true
   http_timeout_seconds: 5.0
 
-webhook:
-  # Shared secret. UniFi Protect must send it as ?token=... on the webhook URL.
-  # Change this. Leave blank only on a trusted VLAN.
-  token: "change-me"
+# URL the PLAYERS use to fetch the chime. Blank = auto-detect this host's IP.
+service_base_url: ""
+listen_host: "0.0.0.0"
+# 8080 collides with all sorts of things on an Unraid box, so the default is 8095.
+listen_port: 8095
 
-  # Optional allowlist so only your front door can ring, matched as a
-  # case-insensitive substring against the Protect payload.
-  allowed_devices: []
-    # - "Front Door"
+log_level: INFO
 """
 
 

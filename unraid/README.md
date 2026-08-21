@@ -10,10 +10,11 @@ and updates are one click on the Docker tab. That's the recommended setup.
 The routes below build the image on the Unraid box instead. Useful for the
 first install before CI exists, or for testing a change without pushing.
 
-Whichever you pick, **host networking is required**. The Bluesound players have
-to reach this service to fetch the chime file, and discovery uses UDP broadcast
-(LSDP) plus mDNS, neither of which crosses a bridge network. The subnet-sweep
-fallback would still work on a bridge, but the chime fetch would not.
+Whichever you pick, **host networking is required**. The players have to reach
+this service to fetch the chime file, and auto-discovery listens for their UDP
+announcements on port 11430 — broadcast doesn't cross a bridge network. On a
+bridge the subnet sweep would still find players, but they couldn't fetch the
+chime, so there's no way around it.
 
 ---
 
@@ -36,7 +37,7 @@ touching your `config.yaml`.
 Then edit the config and restart:
 
 ```bash
-nano /mnt/user/appdata/bluos-doorbell/config/config.yaml
+nano /mnt/user/appdata/bluos-doorbell/config/config.yaml   # set webhook.token
 docker restart bluos-doorbell
 ```
 

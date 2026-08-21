@@ -56,8 +56,11 @@ def test_seeds_empty_install():
 
         cfg = load_config(config_path)
         check("seeded config loads", isinstance(cfg, Config))
-        check("starts unconfigured (no fake zones)", not cfg.is_configured,
+        check("no invented zones — discovery supplies them", cfg.zones == [],
               f"zones={cfg.zones}")
+        check("auto-discovery is on out of the box", cfg.discovery.auto)
+        check("counts as configured, so it runs without hand-editing",
+              cfg.is_configured)
         check("port is the Unraid-safe 8095", cfg.listen_port == 8095,
               str(cfg.listen_port))
         check("chime duration matches the bundled file",
@@ -107,22 +110,28 @@ def test_readonly_mount_does_not_crash():
 
         check("seeding reports failure rather than raising", created is False)
         check("no file was created", not missing.exists())
-        # The entrypoint's fallback is what keeps the container alive.
-        check("an empty Config is still constructible for the fallback",
-              Config().is_configured is False)
+        # The entrypoint's fallback is what keeps the container alive — and
+        # with discovery on it can still find players and chime.
+        fallback = Config()
+        check("an empty Config is constructible for the fallback",
+              isinstance(fallback, Config))
+        check("the fallback still auto-discovers", fallback.discovery.auto)
 
 
 def test_starter_config_is_complete():
     print("\n4. The starter config covers every setting the service reads")
     raw = yaml.safe_load(bootstrap.STARTER_CONFIG)
     for key in ("service_base_url", "listen_host", "listen_port", "zones",
-                "chime", "behaviour", "webhook"):
+                "discovery", "chime", "behaviour", "webhook"):
         check(f"has {key}", key in raw)
     for key in ("debounce_seconds", "fade_ms", "group_policy",
                 "restore_pause_state"):
         check(f"behaviour.{key} documented", key in raw["behaviour"])
+    check("discovery.auto documented", "auto" in raw["discovery"])
     check("tells the user where to edit it without SSH",
           "appdata" in bootstrap.STARTER_CONFIG)
+    check("points at /discover to see what was found",
+          "/discover" in bootstrap.STARTER_CONFIG)
 
 
 def main() -> int:

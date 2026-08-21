@@ -83,9 +83,12 @@ class RingResult:
 
 
 class DoorbellOrchestrator:
-    def __init__(self, config: Config, client: httpx.AsyncClient):
+    def __init__(self, config: Config, client: httpx.AsyncClient, registry=None):
         self.config = config
         self.client = client
+        #: Supplies the live zone list. Without one we fall back to the
+        #: configured zones, which keeps the tests and manual mode simple.
+        self.registry = registry
         self._gate = asyncio.Lock()
         self._active = False
         self._repeat_requested = False
@@ -94,9 +97,20 @@ class DoorbellOrchestrator:
 
     # -- public entry point ---------------------------------------------------
 
+    def target_zones(self) -> list[ZoneConfig]:
+        if self.registry is not None:
+            return self.registry.zones()
+        return self.config.enabled_zones()
+
     async def ring(self, source: str = "manual") -> RingResult:
-        if not self.config.is_configured:
-            log.warning("ring from %s ignored — no zones configured yet. Edit "
+        if not self.target_zones():
+            if self.config.discovery.auto:
+                log.warning("ring from %s ignored — no players discovered yet. "
+                            "Check /discover, or list them under zones: in "
+                            "config.yaml.", source)
+                return RingResult(status="error",
+                                  errors=["no players discovered yet"])
+            log.warning("ring from %s ignored — no zones configured. Edit "
                         "config.yaml and restart.", source)
             return RingResult(status="error",
                               errors=["no zones configured — edit config.yaml"])
@@ -142,9 +156,12 @@ class DoorbellOrchestrator:
             timeout=self.config.behaviour.http_timeout_seconds,
         )
 
+    def _zone_by_address(self, address: str) -> ZoneConfig | None:
+        return next((z for z in self.target_zones() if z.address == address), None)
+
     def _player_from_address(self, address: str) -> BluOSPlayer:
         host, _, port = address.partition(":")
-        zone = self.config.zone_by_address(address)
+        zone = self._zone_by_address(address)
         return self._player(host, int(port or 11000), name=zone.name if zone else host)
 
     async def resolve_groups(self) -> tuple[list[tuple[BluOSPlayer, list[BluOSPlayer], list[ZoneConfig]]], list[str]]:
@@ -153,7 +170,7 @@ class DoorbellOrchestrator:
         Returns (targets, skipped) where each target is
         (primary, all_members_including_primary, zones_that_asked_for_it).
         """
-        zones = self.config.enabled_zones()
+        zones = self.target_zones()
         skipped: list[str] = []
 
         async def sync(zone: ZoneConfig):
@@ -177,7 +194,7 @@ class DoorbellOrchestrator:
             if sync_state.is_secondary:
                 primary_addr = sync_state.master
                 assert primary_addr is not None
-                owns_primary = self.config.zone_by_address(primary_addr) is not None
+                owns_primary = self._zone_by_address(primary_addr) is not None
                 if not owns_primary and self.config.behaviour.group_policy == "skip":
                     log.info(
                         "%s is grouped under %s which is not a target — skipping "
@@ -286,7 +303,7 @@ class DoorbellOrchestrator:
             except BluOSError as exc:
                 log.warning("could not read volume from %s: %s", m.name, exc)
                 return None
-            zone = self.config.zone_by_address(m.address)
+            zone = self._zone_by_address(m.address)
             chime_volume = (
                 zone.chime_volume if zone and zone.chime_volume is not None
                 else self.config.chime.default_volume

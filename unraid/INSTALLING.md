@@ -35,16 +35,16 @@ Read/Write matters — the container writes the starter config on first run.
 Click **Apply**. It creates the folders, writes a starter `config.yaml`,
 installs the default chime, and comes up reporting `unconfigured`.
 
-Then edit the config **from Finder**, no shell involved — appdata is an SMB
-share:
+It also finds your players by itself — there are no IPs to enter. The only
+thing you need to change is the webhook token, and you can do it **from Finder**
+because appdata is an SMB share:
 
 ```
 \\<tower>\appdata\bluos-doorbell\config\config.yaml
 ```
 
-Add your players, set a webhook token, save, and hit **Restart** on the
-container. `http://<tower>:8095/health` should flip from `unconfigured` to
-`ok`.
+Set `webhook.token`, save, hit **Restart** on the container, then check
+`http://<tower>:8095/health` — it lists every player it found.
 
 From then on, **Check for Updates → Apply Update** works exactly like every
 other container, because the Repository field points at a registry tag. Unraid
@@ -116,37 +116,42 @@ Route 1 unless you specifically want to publish this for other people.
 
 ---
 
-## Finding your players without a shell
+## Checking which players it found
 
-Once the container is up, open this in a browser:
+Discovery runs on its own, so this is for looking, not configuring:
 
 ```
 http://<tower>:8095/discover?token=<your-token>
 ```
 
-It returns a ready-to-paste `zones:` block. Copy it into `config.yaml` over the
-SMB share and restart the container.
+Add `&rescan=1` to force a fresh scan if you just plugged a player in and don't
+want to wait for the next refresh.
 
 If it comes back with `count: 0`, the subnet guess was probably wrong — the
-response includes `this_host`, so try the matching range explicitly:
+response includes `this_host`, so set the right range in `config.yaml`:
 
-```
-http://<tower>:8095/discover?token=<your-token>&subnet=192.168.1
+```yaml
+discovery:
+  subnet: "192.168.1"
 ```
 
 ### If discovery finds nothing anywhere
 
-Discovery is only a convenience — the service talks to players over ordinary
-HTTP, so a player that discovery can't see still works fine once you put its IP
-in `config.yaml` by hand. Get IPs from the BluOS app under
+You can always pin a player by hand — the service talks to players over ordinary
+HTTP, so an IP typed into `zones:` works exactly as well as a discovered one. Get IPs from the BluOS app under
 **Settings → Player → Network**, and confirm reachability with:
 
 ```bash
 curl http://<player-ip>:11000/SyncStatus
 ```
 
-If that returns XML, you're done — paste the IP into the config regardless of
-what discovery says.
+If that returns XML, add it to `config.yaml` and restart:
+
+```yaml
+zones:
+  - name: Back Deck
+    host: 192.168.1.60
+```
 
 Common reasons broadcast discovery comes back empty:
 

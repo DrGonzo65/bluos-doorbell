@@ -1,42 +1,61 @@
 # BluOS doorbell chime service — configuration
 #
-# Copy to config.yaml and edit. Find your players' IPs with:
-#   http://<host>:8095/discover?token=<your-token>     (browser, easiest)
-#   python -m tools.discover                            (on the host, not in a container)
-# or from the BluOS app: Settings -> Player -> Network.
+# Copy to config.yaml and edit. The container writes this file for you on first
+# run, so on Unraid you normally never touch this copy.
+#
+# You probably don't need to change anything except the webhook token. The
+# service finds your players by itself and chimes in all of them.
+#
+# Editing without SSH: this file lives on the appdata share, so you can open it
+# straight from Finder or Explorer at
+#     \\<tower>\appdata\bluos-doorbell\config\config.yaml
+#
+# See what was found:  http://<host>:8095/discover?token=<your token>
 
-# URL the PLAYERS use to fetch the chime file. Leave blank to auto-detect the
-# Docker host's primary IP — set it explicitly if the host is multi-homed or
-# the players are on a different VLAN.
-service_base_url: ""
-listen_host: "0.0.0.0"
-# 8080 collides with all sorts of things on an Unraid box, so the default is 8095.
-listen_port: 8095
+webhook:
+  # Shared secret. UniFi Protect sends it as ?token=... on the webhook URL.
+  # Change this. Leave blank only on a trusted VLAN.
+  token: "change-me"
 
-log_level: INFO
+  # Optional allowlist so only your front door can ring, matched as a
+  # case-insensitive substring against the Protect payload.
+  allowed_devices: []
+    # - "Front Door"
 
-zones:
-  - name: Kitchen
-    host: 192.168.1.51
-    chime_volume: 35          # optional per-zone override
+discovery:
+  # Find players automatically. Set false to use only the zones listed below.
+  auto: true
 
-  - name: Living Room
-    host: 192.168.1.52
-    chime_volume: 30
+  # Subnet to sweep, e.g. "192.168.1". Blank = derive it from this host.
+  # Set it if your server has several interfaces and picks the wrong one.
+  subnet: ""
 
-  - name: Office
-    host: 192.168.1.53
+  # How often to re-check. New or renamed players appear within this window;
+  # a player that broadcasts its presence is noticed within about a minute.
+  refresh_seconds: 300
 
-  - name: Primary Bedroom
-    host: 192.168.1.54
-    enabled: true
-    chime_when_idle: false    # don't wake a silent bedroom
-    chime_volume: 20
+  # Never chime these, by name or IP.
+  exclude: []
+    # - "Garage"
+    # - 192.168.1.60
+
+# Only needed to override a discovered player. Match by name or host and set
+# just the fields you want changed — everything else stays automatic.
+zones: []
+  # - name: Primary Bedroom
+  #   chime_when_idle: false    # don't wake a silent room
+  #   chime_volume: 20
+  #
+  # - name: Garage
+  #   enabled: false            # never chime here
+  #
+  # - name: Back Deck           # a player discovery can't see, pinned by hand
+  #   host: 192.168.1.60
 
 chime:
   file: doorbell.mp3
-  # Set this to the real length of your file. Too short clips the chime;
-  # too long leaves a silent gap before the music returns.
+  # Must match the real length of the file. Too short clips the chime; too long
+  # leaves a silent gap before the music comes back. The bundled one is 2.3s.
   duration_seconds: 2.3
   tail_seconds: 0.8
   default_volume: 30
@@ -46,11 +65,10 @@ behaviour:
   # from capturing the already-ducked volume as the "previous" volume.
   debounce_seconds: 8.0
 
-  # Soft fade instead of a hard jump. 0 disables.
+  # Soft fade rather than a hard jump. 0 disables.
   fade_ms: 300
   fade_steps: 4
 
-  # Abandon a source restore if the snapshot is older than this (crash guard).
   state_ttl_seconds: 120.0
 
   # When a target zone is grouped under a primary that isn't itself a target:
@@ -58,18 +76,13 @@ behaviour:
   #   skip    — leave that group alone
   group_policy: primary
 
-  # Put a paused player back to paused rather than leaving it playing.
   restore_pause_state: true
-
   http_timeout_seconds: 5.0
 
-webhook:
-  # Shared secret. Protect must send it as ?token=... or an X-Doorbell-Token
-  # header. Leave blank to disable the check on a trusted VLAN.
-  token: "change-me"
+# URL the PLAYERS use to fetch the chime. Blank = auto-detect this host's IP.
+service_base_url: ""
+listen_host: "0.0.0.0"
+# 8080 collides with all sorts of things on an Unraid box, so the default is 8095.
+listen_port: 8095
 
-  # Optional allowlist so only your front door camera can ring. Matched as a
-  # case-insensitive substring against the Protect payload. Leave empty to
-  # accept every ring the webhook delivers.
-  allowed_devices: []
-    # - "Front Door"
+log_level: INFO

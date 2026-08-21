@@ -12,10 +12,16 @@ from pydantic import BaseModel, Field
 
 
 class ZoneConfig(BaseModel):
-    """One BluOS player that should chime."""
+    """A player that should chime.
 
-    name: str
-    host: str
+    With discovery on (the default) these entries are *overrides*: match a
+    discovered player by name or host and change only the fields you set.
+    An entry with a host that discovery never finds is still used as-is, so
+    you can always pin something by hand.
+    """
+
+    name: str = ""
+    host: str = ""
     port: int = 11000
 
     #: Volume (0-100) the chime plays at in this zone. Falls back to the
@@ -35,6 +41,49 @@ class ZoneConfig(BaseModel):
     @property
     def address(self) -> str:
         return f"{self.host}:{self.port}"
+
+    @property
+    def is_override_only(self) -> bool:
+        """Names a player to tune but doesn't say where it is."""
+        return not self.host and bool(self.name)
+
+    def matches(self, name: str, host: str) -> bool:
+        if self.host and self.host == host:
+            return True
+        return bool(self.name) and self.name.strip().lower() == name.strip().lower()
+
+
+class DiscoveryConfig(BaseModel):
+    """The service finds players itself; you only configure exceptions."""
+
+    #: Discover players automatically. Turn off to use `zones` verbatim.
+    auto: bool = True
+
+    #: Subnet to sweep, e.g. "192.168.1". Blank means derive it from this
+    #: host's own address.
+    subnet: str = ""
+
+    #: How often to re-run discovery. Players that move or get renamed are
+    #: picked up within this window without a restart.
+    refresh_seconds: float = 300.0
+
+    #: Keep a socket open for the announcements players broadcast every ~57s,
+    #: so a newly plugged-in player appears within about a minute.
+    listen: bool = True
+
+    #: A full subnet sweep is heavier than an LSDP query, so only do one every
+    #: Nth refresh — or immediately whenever nothing is known yet.
+    full_sweep_every: int = 12
+
+    #: Names or IPs never to chime, matched case-insensitively.
+    exclude: list[str] = Field(default_factory=list)
+
+    def is_excluded(self, name: str, host: str) -> bool:
+        for entry in self.exclude:
+            needle = entry.strip().lower()
+            if needle and (needle == host.lower() or needle == name.strip().lower()):
+                return True
+        return False
 
 
 class ChimeConfig(BaseModel):
@@ -97,22 +146,24 @@ class Config(BaseModel):
     listen_host: str = "0.0.0.0"
     listen_port: int = 8095
 
+    #: Overrides layered on top of discovery — see ZoneConfig.
     zones: list[ZoneConfig] = Field(default_factory=list)
+    discovery: DiscoveryConfig = Field(default_factory=DiscoveryConfig)
     chime: ChimeConfig = Field(default_factory=ChimeConfig)
     behaviour: BehaviourConfig = Field(default_factory=BehaviourConfig)
     webhook: WebhookConfig = Field(default_factory=WebhookConfig)
 
     log_level: str = "INFO"
 
-    #: Zero zones is legal: a freshly seeded config has none yet. The service
-    #: stays up and reports unconfigured rather than crash-looping, which
-    #: matters when the only way in is the Unraid GUI.
+    #: Zero zones is legal — with discovery on, that is the normal case. The
+    #: service finds its own players and only crash-loops if you insist on
+    #: manual zones and then list none.
     @property
     def is_configured(self) -> bool:
-        return bool(self.enabled_zones())
+        return self.discovery.auto or bool(self.enabled_zones())
 
     def enabled_zones(self) -> list[ZoneConfig]:
-        return [z for z in self.zones if z.enabled]
+        return [z for z in self.zones if z.enabled and z.host]
 
     def zone_by_address(self, address: str) -> ZoneConfig | None:
         return next((z for z in self.zones if z.address == address), None)

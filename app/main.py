@@ -16,6 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .bluos import BluOSError, BluOSPlayer
 from .config import Config, load_config
+from .discovery import PlayerRegistry
 from .orchestrator import DoorbellOrchestrator
 
 log = logging.getLogger("doorbell")
@@ -41,9 +42,11 @@ async def lifespan(app: FastAPI):
     )
 
     client = httpx.AsyncClient(timeout=config.behaviour.http_timeout_seconds)
+    registry = PlayerRegistry(config, client)
     state["config"] = config
     state["client"] = client
-    state["orchestrator"] = DoorbellOrchestrator(config, client)
+    state["registry"] = registry
+    state["orchestrator"] = DoorbellOrchestrator(config, client, registry)
 
     chime_path = CHIME_DIR / config.chime.file
     if not chime_path.exists():
@@ -52,20 +55,35 @@ async def lifespan(app: FastAPI):
 
     log.info("BluOS doorbell service ready (build %s, %s)",
              BUILD["git_sha"][:12], BUILD["built_at"])
-    if config.is_configured:
-        log.info("  zones:     %s", ", ".join(z.name for z in config.enabled_zones()))
+    if config.discovery.auto:
+        log.info("  discovery: on — finding players automatically")
     else:
-        log.warning("  NO ZONES CONFIGURED — edit config.yaml and restart. "
-                    "Nothing will chime until you do.")
+        log.info("  discovery: off — using the %d configured zone(s)",
+                 len(config.enabled_zones()))
     log.info("  chime url: %s", config.chime_url())
     log.info("  webhook:   %s/doorbell", config.resolved_base_url())
     if not config.webhook.token:
         log.warning("  no webhook token set — any host that can reach this port "
                     "can ring the doorbell")
 
+    # Find the players before we start answering rings.
+    try:
+        await registry.start()
+    except Exception as exc:  # noqa: BLE001 - never block startup on discovery
+        log.warning("discovery failed to start: %s", exc)
+
+    zones = _orchestrator().target_zones()
+    if zones:
+        log.info("  zones:     %s", ", ".join(z.name for z in zones))
+    else:
+        log.warning("  NO PLAYERS FOUND YET — discovery keeps trying in the "
+                    "background. Check GET /discover, or list them under "
+                    "zones: in config.yaml.")
+
     try:
         yield
     finally:
+        await registry.stop()
         await client.aclose()
 
 
@@ -153,11 +171,14 @@ async def doorbell(
 @router.get("/health")
 async def health():
     orch = _orchestrator()
+    zones = orch.target_zones()
+    registry = state.get("registry")
     return {
-        "status": "ok" if _config().is_configured else "unconfigured",
+        "status": "ok" if zones else "no-players",
         "build": BUILD,
-        "configured": _config().is_configured,
-        "zones": len(_config().enabled_zones()),
+        "zones": len(zones),
+        "zone_names": [z.name for z in zones],
+        "discovery": registry.status() if registry else None,
         "chime_url": _config().chime_url(),
         "last_result": orch.last_result.as_dict() if orch.last_result else None,
     }
@@ -175,7 +196,7 @@ async def inspect():
     client = state["client"]
     out: list[dict[str, Any]] = []
 
-    for zone in config.zones:
+    for zone in _orchestrator().target_zones():
         player = BluOSPlayer(zone.host, zone.port, name=zone.name, client=client,
                              timeout=config.behaviour.http_timeout_seconds)
         entry: dict[str, Any] = {"name": zone.name, "address": zone.address,
@@ -210,7 +231,9 @@ async def inspect():
         out.append(entry)
 
     targets, skipped = await _orchestrator().resolve_groups()
+    registry = state.get("registry")
     return {
+        "discovery": registry.status() if registry else None,
         "players": out,
         "chime_targets": [
             {
@@ -240,56 +263,60 @@ def _describe_restore(status) -> str:
 
 @router.get("/discover")
 async def discover(
+    rescan: bool = Query(default=False,
+                         description="force a fresh scan instead of the cache"),
     subnet: str | None = Query(default=None,
                                description="first three octets, e.g. 192.168.1"),
     token: str | None = Query(default=None),
     x_doorbell_token: str | None = Header(default=None),
 ):
-    """Find BluOS players on the LAN and return a paste-ready zones block.
+    """What the service currently knows about players on the network.
 
-    Exists so you never need a shell: open this in a browser, copy the yaml
-    field into config.yaml, restart. Tries LSDP broadcast first, then falls
-    back to sweeping the subnet over HTTP, which works even when broadcast
-    and mDNS are blocked.
+    Discovery runs on its own — this endpoint is for looking at the result,
+    and for forcing a rescan with ?rescan=1 if you just plugged something in
+    and don't want to wait for the next refresh.
     """
     _check_token(token, x_doorbell_token)
 
-    from tools.discover import discover_lsdp, discover_sweep, primary_ip
+    from tools.discover import discover_sweep, primary_ip
 
+    registry = state.get("registry")
     ip = primary_ip()
-    subnet = subnet or ".".join(ip.split(".")[:3])
+    resolved = subnet or _config().discovery.subnet or ".".join(ip.split(".")[:3])
 
-    # LSDP is fast when it works, so try it before the 254-address sweep.
-    found, lsdp_error = await asyncio.to_thread(discover_lsdp, 3.0)
-    method = "lsdp"
+    if registry and (rescan or not registry.players):
+        await registry.refresh(force_sweep=True)
 
-    if not found:
-        found = await discover_sweep(subnet)
-        method = "sweep"
+    if registry and registry.config.discovery.auto:
+        zones = _orchestrator().target_zones()
+        players = [{"name": z.name, "host": z.host} for z in zones]
+        status = registry.status()
+    else:
+        # Discovery is switched off; scan on demand so the endpoint still helps.
+        found = await discover_sweep(resolved)
+        players = [{"name": n, "host": h, "detail": d} for h, n, d in found]
+        status = None
 
-    players = [{"name": name, "host": host, "detail": model}
-               for host, name, model in found]
-
-    yaml_block = "zones:\n" + "".join(
-        f"  - name: {p['name']}\n    host: {p['host']}\n"
-        f"    # {p['detail']}\n" for p in players
-    ) if players else "zones: []"
+    yaml_block = ("zones:\n" + "".join(
+        f"  - name: {p['name']}\n    host: {p['host']}\n" for p in players
+    )) if players else "zones: []"
 
     hint = None
     if not players:
-        hint = (f"Nothing answered on {subnet}.0/24. Check the subnet is right "
-                f"(this host is {ip}) and try /discover?subnet=x.y.z")
-    elif method == "sweep":
-        hint = ("Found by sweeping, not by broadcast — harmless, but it means "
-                "LSDP broadcast isn't reaching this host.")
+        hint = (f"Nothing answered on {resolved}.0/24. Check the subnet is right "
+                f"(this host is {ip}) and retry with /discover?rescan=1&subnet=x.y.z")
+    elif _config().discovery.auto:
+        hint = ("These are in use already — with discovery on you don't need to "
+                "paste anything into config.yaml. The zones block below is only "
+                "useful if you want to pin or tune them.")
 
     return {
-        "method": method,
-        "subnet": f"{subnet}.0/24",
+        "auto_discovery": _config().discovery.auto,
+        "subnet": f"{resolved}.0/24",
         "this_host": ip,
         "count": len(players),
         "players": players,
-        "lsdp_error": lsdp_error,
+        "discovery": status,
         "hint": hint,
         "yaml": yaml_block,
     }
