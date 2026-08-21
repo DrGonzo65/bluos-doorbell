@@ -12,6 +12,7 @@ on:
       - '**/*.md'
       - 'config/config.example.yaml'
       - 'LICENSE'
+      - 'Makefile'
   workflow_dispatch:
 
 env:

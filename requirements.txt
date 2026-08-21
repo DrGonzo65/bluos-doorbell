@@ -1,6 +1,12 @@
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-httpx==0.28.1
-pydantic==2.10.4
-PyYAML==6.0.2
-zeroconf==0.136.2
+# Ranges rather than exact pins so this installs on whatever Python you have
+# locally — the pinned-base container image is what makes builds reproducible,
+# not this file. Floors are the versions the code actually needs.
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.34,<1.0
+httpx>=0.28,<1.0
+pydantic>=2.10,<3.0
+PyYAML>=6.0,<7.0
+
+# Optional: only used by the mDNS fallback in tools/discover.py. Discovery
+# works without it via LSDP and the subnet sweep.
+zeroconf>=0.136,<1.0

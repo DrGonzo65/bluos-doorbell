@@ -181,10 +181,23 @@ source you actually use via `/inspect` before assuming it's fine.
 whole group hears the chime — that's how BluOS routes audio, not a choice this
 service makes. Set `group_policy: skip` if you'd rather leave such groups alone.
 
+## Working on it locally
+
+```bash
+make venv      # create .venv and install dependencies
+make test      # run all four suites
+make discover  # find players on this network
+make run       # run the service against config/config.yaml
+```
+
+Dependencies are version ranges, not exact pins, so they install on whatever
+Python you have. The container pins its base image instead, which is what
+actually makes builds reproducible.
+
 ## Tests
 
 ```bash
-python -m tests.test_sequence
+make test
 ```
 
 Four suites cover the choreography, first-run seeding, the LSDP wire format, and
@@ -207,6 +220,7 @@ tools/lsdp.py        Lenbrook Service Discovery Protocol (BluOS's own)
 tools/discover.py    player discovery: LSDP, then mDNS, then a subnet sweep
 app/bootstrap.py     first-run seeding of config.yaml and the default chime
 .github/workflows/   CI: run tests, publish the image to GHCR
+Makefile             make venv / test / run / discover / docker
 templates/           Unraid Docker template (also used for a CA listing)
 unraid/              install and update guides, compose files, scripts
 tests/               mock players and end-to-end tests
