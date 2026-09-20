@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -62,9 +63,21 @@ async def lifespan(app: FastAPI):
                  len(config.enabled_zones()))
     log.info("  chime url: %s", config.chime_url())
     log.info("  webhook:   %s/doorbell", config.resolved_base_url())
-    if not config.webhook.token:
-        log.warning("  no webhook token set — any host that can reach this port "
-                    "can ring the doorbell")
+    if config.webhook.token in DEFAULT_TOKENS:
+        log.warning("=" * 68)
+        if not config.webhook.token:
+            log.warning("  NO WEBHOOK TOKEN SET.")
+            log.warning("  Every endpoint is unauthenticated: anything that can")
+            log.warning("  reach this port can ring the doorbell and read which")
+            log.warning("  players you have and what they are playing.")
+        else:
+            log.warning("  WEBHOOK TOKEN IS STILL THE DEFAULT (%r).",
+                        config.webhook.token)
+            log.warning("  It ships in the public image, so it protects nothing.")
+        log.warning("  Set webhook.token in config.yaml to something random:")
+        log.warning("      python3 -c \"import secrets; print(secrets.token_urlsafe(24))\"")
+        log.warning("  then restart this container.")
+        log.warning("=" * 68)
 
     # Find the players before we start answering rings.
     try:
@@ -102,11 +115,35 @@ def _orchestrator() -> DoorbellOrchestrator:
     return state["orchestrator"]
 
 
-def _check_token(token: str | None, header_token: str | None) -> None:
+#: Tokens shipped in the starter config. Present but useless — anyone who has
+#: seen the repo knows them, so treat them as no token at all.
+DEFAULT_TOKENS = {"", "change-me", "changeme", "CHANGEME"}
+
+
+def _token_ok(token: str | None, header_token: str | None) -> bool:
+    """True when the caller presented the configured token.
+
+    Constant-time comparison so the endpoint can't be used as an oracle to
+    guess the token one character at a time.
+    """
     expected = _config().webhook.token
     if not expected:
+        return False
+    for candidate in (token, header_token):
+        if candidate is not None and hmac.compare_digest(candidate, expected):
+            return True
+    return False
+
+
+def _check_token(token: str | None, header_token: str | None) -> None:
+    """Raise 401 unless the caller is authorised.
+
+    An unset token disables the check entirely — that is a deliberate escape
+    hatch for a trusted VLAN, and the service warns loudly about it at startup.
+    """
+    if not _config().webhook.token:
         return
-    if token != expected and header_token != expected:
+    if not _token_ok(token, header_token):
         raise HTTPException(status_code=401, detail="bad or missing token")
 
 
@@ -169,14 +206,30 @@ async def doorbell(
 
 
 @router.get("/health")
-async def health():
+async def health(
+    token: str | None = Query(default=None),
+    x_doorbell_token: str | None = Header(default=None),
+):
+    """Liveness. Stays reachable without a token because the Unraid WebUI link
+    and the container healthcheck both hit it — but anonymous callers get only
+    a status and a build stamp. Player names, addresses, what is playing and
+    the discovery detail require the token."""
     orch = _orchestrator()
     zones = orch.target_zones()
-    registry = state.get("registry")
-    return {
+
+    basic = {
         "status": "ok" if zones else "no-players",
         "build": BUILD,
         "zones": len(zones),
+    }
+
+    if not _token_ok(token, x_doorbell_token):
+        basic["detail"] = "supply ?token= for player and discovery detail"
+        return basic
+
+    registry = state.get("registry")
+    return {
+        **basic,
         "zone_names": [z.name for z in zones],
         "discovery": registry.status() if registry else None,
         "chime_url": _config().chime_url(),
@@ -185,13 +238,17 @@ async def health():
 
 
 @router.get("/inspect")
-async def inspect():
-    """Dump what every configured player currently reports.
+async def inspect(
+    token: str | None = Query(default=None),
+    x_doorbell_token: str | None = Header(default=None),
+):
+    """Dump what every known player currently reports.
 
-    This is the diagnostic view: it shows each player's OWN volume alongside
-    the playback state, and how the groups resolve. Use it to sanity-check
-    topology and to see what a restore would target.
+    The diagnostic view: each player's OWN volume alongside its playback
+    state, and how the groups resolve. Token required — this exposes player
+    names, LAN addresses and the URL of whatever is currently streaming.
     """
+    _check_token(token, x_doorbell_token)
     config = _config()
     client = state["client"]
     out: list[dict[str, Any]] = []

@@ -45,6 +45,9 @@ jobs:
       - name: Auto-discovery and zone-override tests
         run: python -m tests.test_discovery
 
+      - name: Endpoint authorisation tests
+        run: python -m tests.test_auth
+
       - name: Validate the Unraid template and config sample
         run: |
           python -c "import xml.etree.ElementTree as ET; ET.parse('templates/bluos-doorbell.xml')"

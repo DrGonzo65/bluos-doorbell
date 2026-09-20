@@ -35,8 +35,15 @@ STARTER_CONFIG = """\
 # See what was found:  http://<host>:8095/discover?token=<your token>
 
 webhook:
-  # Shared secret. UniFi Protect sends it as ?token=... on the webhook URL.
-  # Change this. Leave blank only on a trusted VLAN.
+  # Shared secret, sent as ?token=... on the webhook URL. It also gates
+  # /inspect, /discover and the player detail on /health.
+  #
+  # CHANGE THIS. The value below ships inside the public image, so it
+  # protects nothing until you replace it:
+  #     python3 -c "import secrets; print(secrets.token_urlsafe(24))"
+  #
+  # Leaving it blank switches authentication off entirely — reasonable on a
+  # trusted VLAN, and the service warns about it at startup.
   token: "change-me"
 
   # Optional allowlist so only your front door can ring, matched as a

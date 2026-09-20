@@ -43,8 +43,16 @@ because appdata is an SMB share:
 \\<tower>\appdata\bluos-doorbell\config\config.yaml
 ```
 
-Set `webhook.token`, save, hit **Restart** on the container, then check
-`http://<tower>:8095/health` — it lists every player it found.
+Set `webhook.token` to something random — the shipped default is in the public
+image and protects nothing, and the container logs a warning until you change it:
+
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(24))"
+```
+
+Save, hit **Restart**, then check
+`http://<tower>:8095/health?token=<your-token>` — it lists every player it
+found. Without the token that page still answers, but shows only a status.
 
 From then on, **Check for Updates → Apply Update** works exactly like every
 other container, because the Repository field points at a registry tag. Unraid

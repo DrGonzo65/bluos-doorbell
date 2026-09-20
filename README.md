@@ -104,14 +104,31 @@ can't ring the house by accident.
 
 ## Endpoints
 
-| Endpoint | Purpose |
-|---|---|
-| `POST /doorbell?token=…` | Webhook target. Also accepts GET. |
-| `GET /health` | Liveness, discovered players, the build's git sha, and the last ring. |
-| `GET /inspect` | Per-player state, group topology, and restore plans. |
-| `GET /discover?token=…` | What discovery currently knows. `?rescan=1` forces a fresh scan. |
-| `POST /test/chime?token=…` | Run the full sequence, bypassing debounce. |
-| `GET /chimes/<file>` | Serves the chime to the players. |
+| Endpoint | Auth | Purpose |
+|---|---|---|
+| `POST /doorbell` | token | Webhook target. Also accepts GET. |
+| `GET /health` | open | Status and build stamp. With a token, also players, discovery detail and the last ring. |
+| `GET /inspect` | token | Per-player state, group topology, and restore plans. |
+| `GET /discover` | token | What discovery knows. `?rescan=1` forces a fresh scan. |
+| `POST /test/chime` | token | Run the full sequence, bypassing debounce. |
+| `GET /chimes/<file>` | open | Serves the chime — the players fetch it and can't authenticate. |
+
+The token goes in `?token=…` or an `X-Doorbell-Token` header, and is compared
+in constant time.
+
+**Set `webhook.token` to something random before you expose this anywhere.**
+The value in the starter config ships inside the public image, so it protects
+nothing; the service logs a loud warning at startup until you change it.
+
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(24))"
+```
+
+`/health` is deliberately reachable without a token — the Unraid WebUI link and
+the container healthcheck both need it — but anonymous callers get only a status
+and a build stamp, never player names, addresses or what is playing. Leaving
+`webhook.token` blank disables authentication entirely, which is a real option
+on a trusted VLAN and is warned about at startup.
 
 ## Discovery
 
