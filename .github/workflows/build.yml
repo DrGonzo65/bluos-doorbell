@@ -51,6 +51,9 @@ jobs:
       - name: Subnet / CIDR handling tests
         run: python -m tests.test_subnet
 
+      - name: Single-room test endpoint
+        run: python -m tests.test_single_room
+
       - name: Validate the Unraid template and config sample
         run: |
           python -c "import xml.etree.ElementTree as ET; ET.parse('templates/bluos-doorbell.xml')"

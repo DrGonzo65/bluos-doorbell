@@ -385,15 +385,48 @@ async def discover(
     }
 
 
-@router.post("/test/chime")
-async def test_chime(token: str | None = Query(default=None),
-                     x_doorbell_token: str | None = Header(default=None)):
-    """Fire the full sequence manually, bypassing the debounce window."""
+@router.api_route("/test/chime", methods=["GET", "POST"])
+async def test_chime(
+    zone: list[str] | None = Query(
+        default=None,
+        description="Room(s) to test, by name or IP. Repeat for several; "
+                    "omit to test every room."),
+    token: str | None = Query(default=None),
+    x_doorbell_token: str | None = Header(default=None),
+):
+    """Fire the full sequence by hand, bypassing the debounce window.
+
+    GET works too, so a test is a link you can open in a browser:
+        /test/chime?token=...&zone=Kitchen
+    """
     _check_token(token, x_doorbell_token)
     orch = _orchestrator()
+
+    only = None
+    if zone:
+        known = orch.target_zones()
+        only, unknown = [], []
+        for wanted in zone:
+            needle = wanted.strip().lower()
+            match = next((z for z in known
+                          if z.name.strip().lower() == needle or z.host == wanted.strip()),
+                         None)
+            if match is None:
+                unknown.append(wanted)
+            elif match not in only:
+                only.append(match)
+        if unknown:
+            raise HTTPException(status_code=404, detail={
+                "error": f"no such room: {', '.join(unknown)}",
+                "rooms": sorted(z.name for z in known),
+            })
+
     orch._last_ring = -1e9  # noqa: SLF001 - deliberate test escape hatch
-    result = await orch.ring(source="manual test")
-    return result.as_dict()
+    result = await orch.ring(source="manual test", only=only)
+    out = result.as_dict()
+    if only:
+        out["tested"] = [z.name for z in only]
+    return out
 
 
 app.include_router(router)

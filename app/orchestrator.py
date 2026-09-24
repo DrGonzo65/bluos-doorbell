@@ -70,6 +70,9 @@ class RingResult:
     groups: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    #: Things worth knowing that aren't errors — e.g. a room you targeted is
+    #: grouped, so other rooms heard the chime too.
+    notes: list[str] = field(default_factory=list)
     duration_seconds: float = 0.0
 
     def as_dict(self) -> dict[str, Any]:
@@ -78,6 +81,7 @@ class RingResult:
             "groups": self.groups,
             "skipped": self.skipped,
             "errors": self.errors,
+            "notes": self.notes,
             "duration_seconds": round(self.duration_seconds, 2),
         }
 
@@ -102,8 +106,15 @@ class DoorbellOrchestrator:
             return self.registry.zones()
         return self.config.enabled_zones()
 
-    async def ring(self, source: str = "manual") -> RingResult:
-        if not self.target_zones():
+    async def ring(self, source: str = "manual",
+                   only: list[ZoneConfig] | None = None) -> RingResult:
+        """Run the chime sequence.
+
+        ``only`` restricts it to specific zones — used by the single-room test.
+        A zone that is a group secondary still chimes via its primary, so the
+        whole group hears it; that's how BluOS routes audio.
+        """
+        if not (only or self.target_zones()):
             if self.config.discovery.auto:
                 log.warning("ring from %s ignored — no players discovered yet. "
                             "Check /discover, or list them under zones: in "
@@ -136,7 +147,7 @@ class DoorbellOrchestrator:
 
         started = time.monotonic()
         try:
-            result = await self._run_sequence()
+            result = await self._run_sequence(only)
         except Exception as exc:  # noqa: BLE001 - never let a ring kill the service
             log.exception("doorbell sequence failed")
             result = RingResult(status="error", errors=[str(exc)])
@@ -164,13 +175,14 @@ class DoorbellOrchestrator:
         zone = self._zone_by_address(address)
         return self._player(host, int(port or 11000), name=zone.name if zone else host)
 
-    async def resolve_groups(self) -> tuple[list[tuple[BluOSPlayer, list[BluOSPlayer], list[ZoneConfig]]], list[str]]:
+    async def resolve_groups(self, zones: list[ZoneConfig] | None = None
+                             ) -> tuple[list[tuple[BluOSPlayer, list[BluOSPlayer], list[ZoneConfig]]], list[str]]:
         """Map configured zones onto the group primaries that must be addressed.
 
         Returns (targets, skipped) where each target is
         (primary, all_members_including_primary, zones_that_asked_for_it).
         """
-        zones = self.target_zones()
+        zones = zones if zones is not None else self.target_zones()
         skipped: list[str] = []
 
         async def sync(zone: ZoneConfig):
@@ -242,8 +254,8 @@ class DoorbellOrchestrator:
 
     # -- the sequence ---------------------------------------------------------
 
-    async def _run_sequence(self) -> RingResult:
-        targets, skipped = await self.resolve_groups()
+    async def _run_sequence(self, only: list[ZoneConfig] | None = None) -> RingResult:
+        targets, skipped = await self.resolve_groups(only)
         if not targets:
             return RingResult(status="error", skipped=skipped,
                               errors=["no reachable zones"])
@@ -258,8 +270,8 @@ class DoorbellOrchestrator:
         for snap in snapshots:
             if isinstance(snap, BaseException):
                 errors.append(str(snap))
-            elif snap is None:
-                continue
+            elif isinstance(snap, str):
+                skipped.append(snap)
             else:
                 live.append(snap)
 
@@ -279,15 +291,27 @@ class DoorbellOrchestrator:
                 if isinstance(r, BaseException):
                     errors.append(str(r))
 
+        # If you targeted one room and it's grouped, the others heard it too —
+        # say so, so a single-room test doesn't look like it misfired.
+        notes: list[str] = []
+        for snap in live:
+            asked = {z.address for z in snap.zones}
+            others = [m.player.name for m in snap.members if m.player.address not in asked]
+            if others:
+                notes.append(f"{snap.label} is grouped with {', '.join(others)}, "
+                             f"so {'it' if len(others) == 1 else 'they'} heard the chime too")
+
         return RingResult(
             status="chimed",
             groups=[s.label for s in live],
             skipped=skipped,
             errors=errors,
+            notes=notes,
         )
 
     async def _capture(self, primary: BluOSPlayer, members: list[BluOSPlayer],
-                       zones: list[ZoneConfig]) -> GroupSnapshot | None:
+                       zones: list[ZoneConfig]) -> GroupSnapshot | str:
+        """Snapshot a group, or return a human-readable reason for skipping it."""
         """Read playback state once, and each member's OWN volume."""
         status = await primary.status()
 
@@ -295,7 +319,8 @@ class DoorbellOrchestrator:
         if not status.is_active and not any(z.chime_when_idle for z in zones):
             log.info("%s is idle and no zone wants an idle chime — skipping",
                      primary.name)
-            return None
+            return (f"{' + '.join(z.name for z in zones) or primary.name} "
+                    f"(idle, and chime_when_idle is off)")
 
         async def member_volume(m: BluOSPlayer) -> MemberSnapshot | None:
             try:
@@ -316,7 +341,8 @@ class DoorbellOrchestrator:
         if member_snaps and all(m.volume.mute for m in member_snaps) \
                 and not any(z.chime_when_muted for z in zones):
             log.info("%s is muted — skipping", primary.name)
-            return None
+            return (f"{' + '.join(z.name for z in zones) or primary.name} "
+                    f"(muted, and chime_when_muted is off)")
 
         log.info(
             "captured %s: state=%s source=%s members=%s",

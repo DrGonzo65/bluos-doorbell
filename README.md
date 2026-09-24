@@ -79,11 +79,24 @@ curl -s http://<docker-host>:8095/inspect | jq
 different in each zone and re-run it — that's the fastest way to confirm the
 restore logic covers all the sources you actually use.
 
-Fire the whole sequence by hand:
+Fire the whole sequence by hand — every room, or just one:
 
-```bash
-curl -X POST "http://<docker-host>:8095/test/chime?token=<your-token>"
 ```
+http://<docker-host>:8095/test/chime?token=<your-token>
+http://<docker-host>:8095/test/chime?token=<your-token>&zone=Kitchen
+```
+
+Both work as plain links in a browser. `zone` matches the room name
+(case-insensitive) or its IP, and can be repeated to test several rooms at once.
+A typo returns a 404 listing the rooms that exist. Rooms you didn't name are
+left completely alone.
+
+Two things the response will tell you rather than leave you guessing:
+
+- **Grouped rooms** — if the room you picked is grouped, BluOS plays the chime
+  through the whole group, and `notes` says which other rooms heard it.
+- **Skipped rooms** — if a room was skipped, `skipped` says why, e.g. it was
+  idle and has `chime_when_idle: false`.
 
 ## Wiring up UniFi Protect
 
@@ -110,7 +123,7 @@ can't ring the house by accident.
 | `GET /health` | open | Status and build stamp. With a token, also players, discovery detail and the last ring. |
 | `GET /inspect` | token | Per-player state, group topology, and restore plans. |
 | `GET /discover` | token | What discovery knows. `?rescan=1` forces a fresh scan. |
-| `POST /test/chime` | token | Run the full sequence, bypassing debounce. |
+| `GET/POST /test/chime` | token | Run the full sequence, bypassing debounce. `?zone=Kitchen` tests one room. |
 | `GET /chimes/<file>` | open | Serves the chime — the players fetch it and can't authenticate. |
 
 The token goes in `?token=…` or an `X-Doorbell-Token` header, and is compared
