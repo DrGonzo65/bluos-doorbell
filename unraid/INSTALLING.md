@@ -135,13 +135,22 @@ http://<tower>:8095/discover?token=<your-token>
 Add `&rescan=1` to force a fresh scan if you just plugged a player in and don't
 want to wait for the next refresh.
 
-If it comes back with `count: 0`, the subnet guess was probably wrong — the
-response includes `this_host`, so set the right range in `config.yaml`:
+If it comes back with `count: 0`, it probably swept the wrong network. The
+response shows what it swept (`subnet`) and why (`subnet_source`) — if your
+players are on a different VLAN from Unraid, that's the usual cause. Set the
+network they're actually on, as CIDR:
 
 ```yaml
 discovery:
-  subnet: "192.168.1"
+  subnet: "192.168.20.0/24"
 ```
+
+Or try one first without editing anything:
+`/discover?token=<your-token>&rescan=1&subnet=192.168.20.0/24`.
+
+Left blank, it uses Unraid's own subnet with its real netmask, so a /23 or /22
+LAN is covered in full. Anything larger than a /20 is refused, since sweeping
+thousands of addresses would take ages and look like a port scan.
 
 ### If discovery finds nothing anywhere
 
@@ -172,4 +181,5 @@ Common reasons broadcast discovery comes back empty:
 - **Client isolation / multicast filtering** on the WiFi SSID the players are
   joined to. UniFi calls it "Client Device Isolation" and Multicast Enhancement.
 - **Different VLANs.** Broadcast and mDNS don't route. The subnet sweep still
-  works if the VLANs can reach each other over HTTP.
+  works if the VLANs can reach each other over HTTP — set `discovery.subnet` to
+  the players' VLAN, e.g. `192.168.20.0/24`.

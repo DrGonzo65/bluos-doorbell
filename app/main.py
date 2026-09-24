@@ -323,7 +323,7 @@ async def discover(
     rescan: bool = Query(default=False,
                          description="force a fresh scan instead of the cache"),
     subnet: str | None = Query(default=None,
-                               description="first three octets, e.g. 192.168.1"),
+                               description="CIDR to sweep, e.g. 192.168.1.0/24"),
     token: str | None = Query(default=None),
     x_doorbell_token: str | None = Header(default=None),
 ):
@@ -335,11 +335,15 @@ async def discover(
     """
     _check_token(token, x_doorbell_token)
 
-    from tools.discover import discover_sweep, primary_ip
+    from tools.discover import discover_sweep
+    from tools.netutil import SubnetError, primary_ip, resolve
 
     registry = state.get("registry")
     ip = primary_ip()
-    resolved = subnet or _config().discovery.subnet or ".".join(ip.split(".")[:3])
+    try:
+        network, source = resolve(subnet or _config().discovery.subnet)
+    except SubnetError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
 
     if registry and (rescan or not registry.players):
         await registry.refresh(force_sweep=True)
@@ -350,7 +354,7 @@ async def discover(
         status = registry.status()
     else:
         # Discovery is switched off; scan on demand so the endpoint still helps.
-        found = await discover_sweep(resolved)
+        found = await discover_sweep(network)
         players = [{"name": n, "host": h, "detail": d} for h, n, d in found]
         status = None
 
@@ -360,8 +364,9 @@ async def discover(
 
     hint = None
     if not players:
-        hint = (f"Nothing answered on {resolved}.0/24. Check the subnet is right "
-                f"(this host is {ip}) and retry with /discover?rescan=1&subnet=x.y.z")
+        hint = (f"Nothing answered on {network}. Check that's the right network "
+                f"(this host is {ip}), then set discovery.subnet to the CIDR your "
+                f"players are on, or try /discover?rescan=1&subnet=<cidr>")
     elif _config().discovery.auto:
         hint = ("These are in use already — with discovery on you don't need to "
                 "paste anything into config.yaml. The zones block below is only "
@@ -369,7 +374,8 @@ async def discover(
 
     return {
         "auto_discovery": _config().discovery.auto,
-        "subnet": f"{resolved}.0/24",
+        "subnet": str(network),
+        "subnet_source": source,
         "this_host": ip,
         "count": len(players),
         "players": players,

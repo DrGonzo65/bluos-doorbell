@@ -8,7 +8,9 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from tools.netutil import SubnetError, check_sweepable, parse_subnet
 
 
 class ZoneConfig(BaseModel):
@@ -59,9 +61,23 @@ class DiscoveryConfig(BaseModel):
     #: Discover players automatically. Turn off to use `zones` verbatim.
     auto: bool = True
 
-    #: Subnet to sweep, e.g. "192.168.1". Blank means derive it from this
-    #: host's own address.
+    #: Network to sweep, as CIDR: "192.168.1.0/24", "10.0.4.0/22". Blank means
+    #: this host's own subnet, using the interface's real netmask. Normalised
+    #: on load, so "192.168.1.37/24" is stored as "192.168.1.0/24"; the old
+    #: three-octet form ("192.168.1") is still read as a /24.
     subnet: str = ""
+
+    @field_validator("subnet")
+    @classmethod
+    def _valid_cidr(cls, value: str) -> str:
+        if not value or not value.strip():
+            return ""
+        try:
+            net = parse_subnet(value)
+            check_sweepable(net)
+        except SubnetError as exc:
+            raise ValueError(f"discovery.subnet: {exc}") from None
+        return str(net)
 
     #: How often to re-run discovery. Players that move or get renamed are
     #: picked up within this window without a restart.

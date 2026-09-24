@@ -33,8 +33,10 @@ discovery:
   # Find players automatically. Set false to use only the zones listed below.
   auto: true
 
-  # Subnet to sweep, e.g. "192.168.1". Blank = derive it from this host.
-  # Set it if your server has several interfaces and picks the wrong one.
+  # Network to sweep, as CIDR: "192.168.1.0/24", "10.0.4.0/22". Blank = this
+  # host's own subnet, using its real netmask. Set it if the players live on a
+  # different VLAN from this server, or it has several interfaces and picks the
+  # wrong one. Anything larger than a /20 is refused — narrow it instead.
   subnet: ""
 
   # How often to re-check. New or renamed players appear within this window;

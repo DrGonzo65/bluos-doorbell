@@ -164,9 +164,11 @@ zones:
 Set `discovery.auto: false` to ignore the network entirely and use only the
 zones you list.
 
-If discovery finds nothing, the subnet guess is the usual cause —
-`/health` reports the host address it derived, and `discovery.subnet` overrides
-it. Discovery needs host networking; on a bridge network the sweep still works
+If discovery finds nothing, it's usually sweeping the wrong network — typically
+because the players are on a different VLAN from the server. `/health` (with the
+token) shows which network it swept; set `discovery.subnet` to the right one as
+CIDR, e.g. `192.168.20.0/24`. Blank means the server's own subnet with its real
+netmask; anything larger than a /20 is refused. Discovery needs host networking; on a bridge network the sweep still works
 but players can't fetch the chime, so host networking is required regardless.
 
 ## Tuning

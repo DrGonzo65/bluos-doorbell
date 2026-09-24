@@ -25,7 +25,8 @@ import httpx
 
 from .config import Config, ZoneConfig
 from tools import lsdp
-from tools.discover import discover_sweep, primary_ip, probe
+from tools.discover import discover_sweep, probe
+from tools.netutil import SubnetError, resolve
 
 log = logging.getLogger("doorbell.discovery")
 
@@ -66,6 +67,8 @@ class PlayerRegistry:
         self.players: dict[str, DiscoveredPlayer] = {}
         self.last_refresh: float | None = None
         self.last_error: str | None = None
+        #: The CIDR last swept, for /health and /discover.
+        self.network: str | None = None
         self._refreshes = 0
         self._transport: asyncio.DatagramTransport | None = None
         self._tasks: list[asyncio.Task] = []
@@ -168,10 +171,19 @@ class PlayerRegistry:
             #    for players whose broadcasts never reach us.
             due = cfg.full_sweep_every > 0 and self._refreshes % cfg.full_sweep_every == 0
             if force_sweep or due or not self.players:
-                subnet = cfg.subnet or ".".join(primary_ip().split(".")[:3])
-                log.info("sweeping %s.0/24 for players", subnet)
-                for host, name, detail in await discover_sweep(subnet):
-                    self.note(host, name, detail, "sweep")
+                try:
+                    network, source = resolve(cfg.subnet)
+                except SubnetError as exc:
+                    network = None
+                    self.last_error = str(exc)
+                    log.warning("not sweeping: %s", exc)
+                if network is not None:
+                    self.network = str(network)
+                    log.info("sweeping %s (%s, %d addresses) for players",
+                             network, source, network.num_addresses - 2
+                             if network.prefixlen < 31 else network.num_addresses)
+                    for host, name, detail in await discover_sweep(network):
+                        self.note(host, name, detail, "sweep")
 
             self._refreshes += 1
             self.last_refresh = time.monotonic()
@@ -191,7 +203,11 @@ class PlayerRegistry:
         the event loop; replies land on whichever socket is listening.
         """
         from tools.discover import discover_lsdp
-        return discover_lsdp(timeout)
+        try:
+            network, _ = resolve(self.config.discovery.subnet)
+        except SubnetError:
+            network = None
+        return discover_lsdp(timeout, network)
 
     async def _verify_known(self) -> None:
         """Confirm known players still answer, and pick up renames."""
@@ -267,7 +283,8 @@ class PlayerRegistry:
                 round(time.monotonic() - self.last_refresh, 1)
                 if self.last_refresh else None
             ),
-            "last_lsdp_error": self.last_error,
+            "network": self.network,
+            "last_error": self.last_error,
             "players": [
                 {"name": p.name, "host": p.host, "port": p.port,
                  "detail": p.detail, "source": p.source,

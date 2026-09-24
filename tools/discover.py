@@ -12,7 +12,7 @@ reasons that have nothing to do with your players:
 
 Usage:
     python -m tools.discover                     # all three, auto subnet
-    python -m tools.discover --subnet 192.168.1  # force the range to sweep
+    python -m tools.discover --subnet 192.168.1.0/24  # force the range to sweep
     python -m tools.discover --method sweep      # skip straight to the sweep
     python -m tools.discover --timeout 6
 """
@@ -25,11 +25,13 @@ import socket
 import sys
 import time
 
+import ipaddress
 from pathlib import Path
 
 import httpx
 
 from . import lsdp
+from .netutil import SubnetError, local_network, primary_ip, resolve, sweep_hosts
 
 BLUOS_PORT = 11000
 
@@ -47,28 +49,21 @@ def in_container() -> bool:
 # --------------------------------------------------------------------------
 # helpers
 
-def primary_ip() -> str:
-    """The local address other hosts on the LAN would reach us on."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    try:
-        sock.connect(("1.1.1.1", 53))
-        return sock.getsockname()[0]
-    except OSError:
-        return "127.0.0.1"
-    finally:
-        sock.close()
-
-
-def broadcast_targets(ip: str) -> list[str]:
+def broadcast_targets(network: ipaddress.IPv4Network | None = None) -> list[str]:
     """Where to send the LSDP query.
 
-    255.255.255.255 only leaves via the default route on some stacks, so send
-    to the /24 directed broadcast too.
+    255.255.255.255 only leaves via the default route on some stacks, so also
+    send to the network's directed broadcast — the real one for its prefix,
+    e.g. 192.168.1.255 for a /24 or 10.0.7.255 for 10.0.4.0/22.
     """
     targets = ["255.255.255.255"]
-    parts = ip.split(".")
-    if len(parts) == 4 and ip != "127.0.0.1":
-        targets.append(f"{parts[0]}.{parts[1]}.{parts[2]}.255")
+    if network is None:
+        try:
+            network, _ = local_network()
+        except SubnetError:
+            return targets
+    if network.prefixlen < 31:
+        targets.append(str(network.broadcast_address))
     return targets
 
 
@@ -104,13 +99,13 @@ async def probe(client: httpx.AsyncClient, host: str, port: int = BLUOS_PORT
 # --------------------------------------------------------------------------
 # method 1: LSDP
 
-def discover_lsdp(timeout: float) -> tuple[list[tuple[str, str, str]], str | None]:
+def discover_lsdp(timeout: float, network: ipaddress.IPv4Network | None = None
+                  ) -> tuple[list[tuple[str, str, str]], str | None]:
     """Broadcast an LSDP query and collect announcements.
 
     Returns (found, error). `error` is a human-readable reason when the socket
     itself failed, which is the interesting case on macOS.
     """
-    ip = primary_ip()
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -134,7 +129,7 @@ def discover_lsdp(timeout: float) -> tuple[list[tuple[str, str, str]], str | Non
     query = lsdp.build_query()
     sent = 0
     send_error = None
-    for target in broadcast_targets(ip):
+    for target in broadcast_targets(network):
         try:
             sock.sendto(query, (target, lsdp.PORT))
             sent += 1
@@ -205,9 +200,16 @@ def discover_mdns(timeout: float) -> tuple[list[tuple[str, str, str]], str | Non
 # --------------------------------------------------------------------------
 # method 3: subnet sweep
 
-async def discover_sweep(subnet: str, concurrency: int = 64
-                         ) -> list[tuple[str, str, str]]:
-    hosts = [f"{subnet}.{i}" for i in range(1, 255)]
+async def discover_sweep(network: ipaddress.IPv4Network | str, concurrency: int = 64,
+                         progress: bool = False) -> list[tuple[str, str, str]]:
+    """Probe every host address in ``network`` for /SyncStatus.
+
+    ``network`` is a CIDR string or an IPv4Network. The service calls this
+    with progress off so a /22 doesn't write 40 progress lines to the log.
+    """
+    if isinstance(network, str):
+        network, _ = resolve(network)
+    hosts = sweep_hosts(network)
     semaphore = asyncio.Semaphore(concurrency)
     found: list[tuple[str, str, str]] = []
 
@@ -219,14 +221,16 @@ async def discover_sweep(subnet: str, concurrency: int = 64
                 found.append(result)
 
         done = 0
+        step = max(25, len(hosts) // 20)
         tasks = [asyncio.create_task(one(h)) for h in hosts]
         for task in asyncio.as_completed(tasks):
             await task
             done += 1
-            if done % 25 == 0 or done == len(hosts):
+            if progress and (done % step == 0 or done == len(hosts)):
                 print(f"\r  swept {done}/{len(hosts)} addresses, "
                       f"found {len(found)}", end="", file=sys.stderr, flush=True)
-    print(file=sys.stderr)
+    if progress:
+        print(file=sys.stderr)
     return sorted(found, key=lambda r: [int(p) for p in r[0].split(".")])
 
 
@@ -244,15 +248,21 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Find BluOS players on the LAN")
     parser.add_argument("--method", choices=["auto", "lsdp", "mdns", "sweep"],
                         default="auto")
-    parser.add_argument("--subnet", help="first three octets to sweep, "
-                                         "e.g. 192.168.1 (default: this host's)")
+    parser.add_argument("--subnet", help="network to sweep as CIDR, e.g. "
+                                         "192.168.1.0/24 or 10.0.4.0/22 "
+                                         "(default: this host's own subnet)")
     parser.add_argument("--timeout", type=float, default=4.0,
                         help="seconds to listen for LSDP/mDNS (default 4)")
     args = parser.parse_args()
 
     ip = primary_ip()
-    subnet = args.subnet or ".".join(ip.split(".")[:3])
-    print(f"This host: {ip}   sweeping subnet: {subnet}.0/24", file=sys.stderr)
+    try:
+        network, source = resolve(args.subnet)
+    except SubnetError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(f"This host: {ip}   network: {network} ({source}, "
+          f"{len(sweep_hosts(network))} addresses)", file=sys.stderr)
 
     if in_container():
         print("\nRunning inside a container. Broadcast and mDNS only reach the\n"
@@ -267,7 +277,7 @@ def main() -> int:
     if args.method in ("auto", "lsdp"):
         print(f"\n[1/3] LSDP broadcast on udp/{lsdp.PORT} "
               f"({args.timeout:.0f}s)...", file=sys.stderr)
-        found, error = discover_lsdp(args.timeout)
+        found, error = discover_lsdp(args.timeout, network)
         if error:
             print(f"      {error}", file=sys.stderr)
             lsdp_blocked = True
@@ -291,9 +301,9 @@ def main() -> int:
             return 0
 
     if args.method in ("auto", "sweep"):
-        print(f"\n[3/3] Sweeping {subnet}.1-254 on port {BLUOS_PORT}...",
+        print(f"\n[3/3] Sweeping {network} on port {BLUOS_PORT}...",
               file=sys.stderr)
-        found = asyncio.run(discover_sweep(subnet))
+        found = asyncio.run(discover_sweep(network, progress=True))
         if found:
             print(f"      {len(found)} player(s)", file=sys.stderr)
             emit(found)
@@ -315,8 +325,8 @@ def main() -> int:
 
     print("\nNo players found by any method.", file=sys.stderr)
     print("\nThings to check:", file=sys.stderr)
-    print(f"  * Is the subnet right? Tried {subnet}.0/24 — override with --subnet",
-          file=sys.stderr)
+    print(f"  * Is the network right? Tried {network} — override with "
+          f"--subnet <cidr>", file=sys.stderr)
     print("  * Can you reach one directly? curl http://<player-ip>:11000/SyncStatus",
           file=sys.stderr)
     print("  * Get an IP from the BluOS app: Settings -> Player -> Network",
