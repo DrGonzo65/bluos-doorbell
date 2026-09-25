@@ -32,6 +32,7 @@ def _xml_to_dict(text: str) -> dict[str, Any]:
     root = ET.fromstring(text)
     out: dict[str, Any] = {f"@{k}": v for k, v in root.attrib.items()}
     out["@root"] = root.tag
+    out["@text"] = (root.text or "").strip()
 
     for child in root:
         # Keep child attributes too — <slave id="..." port="..."/> carries
@@ -188,16 +189,16 @@ class BluOSPlayer:
     async def volume(self) -> VolumeState:
         """GET /Volume — this player's OWN volume, unlike /Status when grouped."""
         data = await self._get("/Volume")
-        db_raw = data.get("db")
+        db_raw = data.get("db", data.get("@db"))
         try:
             db = float(db_raw) if db_raw not in (None, "") else None
         except (TypeError, ValueError):
             db = None
         return VolumeState(
             level=_as_int(data.get("volume"), -1) if data.get("volume") is not None
-            else _as_int(data.get("@volume"), -1),
+            else _as_int(data.get("@text") or data.get("@volume"), -1),
             db=db,
-            mute=_as_int(data.get("mute"), 0) == 1,
+            mute=_as_int(data.get("mute", data.get("@mute")), 0) == 1,
         )
 
     async def sync_status(self) -> SyncState:

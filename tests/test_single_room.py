@@ -6,6 +6,8 @@ Run: python -m tests.test_single_room
 from __future__ import annotations
 
 import sys
+from unittest.mock import patch
+from app.bluos import BluOSPlayer, BluOSError
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -179,6 +181,42 @@ def test_still_needs_token():
     check("nothing played", not any(touched(p) for p in ALL))
 
 
+def test_playback_failure_visible():
+    print("\n8. Failed playback is reported and volume is restored")
+    reset(*ALL)
+    async def fail_play(self, url):
+        raise BluOSError(f"{self.name}: /Play failed: unavailable")
+    with patch.object(BluOSPlayer, "play_url", fail_play):
+        body = client().post("/test/chime", params={"token": TOKEN, "zone": "Kitchen"}).json()
+    check("failed command is not reported as chimed", body.get("status") == "error", str(body))
+    check("playback error reaches browser", any("/Play failed" in e for e in body.get("errors", [])), str(body))
+    check("volume restored after playback error", KITCHEN.volume == 50, str(KITCHEN.volume))
+
+
+def test_default_volume_changes():
+    print("\n9. Saved default volume applies on the next chime unless overridden")
+    original_default = CONFIG.chime.default_volume
+    original_override = CONFIG.zones[0].chime_volume
+    try:
+        CONFIG.zones[0].chime_volume = None
+        for level in (20, 45, 0):
+            reset(*ALL)
+            CONFIG.chime.default_volume = level
+            body = client().post("/test/chime", params={"token": TOKEN, "zone": "Kitchen"}).json()
+            check(f"default {level} applied before restoring volume",
+                  body.get("status") == "chimed" and KITCHEN.volume_writes == [(level, "0"), (50, "0")],
+                  str(KITCHEN.volume_writes))
+        reset(*ALL)
+        CONFIG.zones[0].chime_volume = 25
+        CONFIG.chime.default_volume = 40
+        client().post("/test/chime", params={"token": TOKEN, "zone": "Kitchen"})
+        check("room override takes precedence over default",
+              KITCHEN.volume_writes == [(25, "0"), (50, "0")], str(KITCHEN.volume_writes))
+    finally:
+        CONFIG.chime.default_volume = original_default
+        CONFIG.zones[0].chime_volume = original_override
+
+
 def main() -> int:
     test_one_room_only()
     test_matching()
@@ -187,6 +225,8 @@ def main() -> int:
     test_skip_reason_visible()
     test_full_ring_has_no_group_noise()
     test_still_needs_token()
+    test_playback_failure_visible()
+    test_default_volume_changes()
 
     print("\n" + "=" * 60)
     if failures:

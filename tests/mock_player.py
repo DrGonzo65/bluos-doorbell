@@ -91,10 +91,7 @@ def _sync_xml(p: MockPlayer) -> str:
 
 def _volume_xml(p: MockPlayer) -> str:
     vol = -1 if p.fixed_volume else p.volume
-    return (f'<volume db="-20.0" mute="{1 if p.mute else 0}" etag="v1">{vol}</volume>'
-            if False else
-            f'<volume etag="v1"><volume>{vol}</volume><db>-20.0</db>'
-            f'<mute>{1 if p.mute else 0}</mute></volume>')
+    return f'<volume db="-20.0" mute="{1 if p.mute else 0}" etag="v1">{vol}</volume>'
 
 
 class _Handler(BaseHTTPRequestHandler):

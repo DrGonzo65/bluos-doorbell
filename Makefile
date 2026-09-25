@@ -16,6 +16,7 @@ venv:  ## Create .venv and install dependencies
 	@echo "Done. Run 'make test' or 'make discover'."
 
 test:  ## Run every test suite
+	@$(PY) -m tests.test_player_responses
 	@$(PY) -m tests.test_sequence
 	@$(PY) -m tests.test_bootstrap
 	@$(PY) -m tests.test_lsdp

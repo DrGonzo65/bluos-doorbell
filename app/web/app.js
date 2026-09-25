@@ -36,7 +36,7 @@ function renderBells(){
     right.append(node('p',`${durationFor(bell.file).toFixed(2)} seconds · measured automatically`,'hint timing'));
     right.append(field('Extra time after sound (seconds)',bell.tail_seconds??settings.chime.tail_seconds,'number',v=>bell.tail_seconds=v,{min:0,max:10,step:.1}));
     const tools=node('div',undefined,'bell-tools');
-    tools.append(button('Test on speakers',async()=>{if(dirty)throw Error('Save your changes before testing on speakers.');const r=await api('/test/chime?doorbell='+encodeURIComponent(name),{method:'POST'});notice(`${r.status}: ${(r.groups||[]).join(', ')||'no rooms'}${r.errors?.length?' — '+r.errors.join('; '):''}`);if(r.notes?.length)notice(`${r.status}: ${r.notes.join('; ')}`);}));
+    tools.append(button('Test on speakers',async()=>{if(dirty)throw Error('Save your changes before testing on speakers.');const r=await api('/test/chime?doorbell='+encodeURIComponent(name),{method:'POST'});showTestResult(r);}));
     if(name!=='default')tools.append(button('Remove',async()=>{delete settings.doorbells[name];delete renames[name];changed();renderBells();},'danger'));left.append(tools);
     const url=node('div',undefined,'bell-url'),path=name==='default'?'/doorbell':'/doorbell/'+encodeURIComponent(name),text=data.base_url+path;
     url.append(node('code',text+'?token=••••••'),button('Copy webhook',async()=>{if(dirty)throw Error('Save your changes before copying the webhook.');await copyText(text+'?token='+encodeURIComponent(token));notice('Webhook URL copied, including your token.');}));
@@ -55,7 +55,7 @@ function renderRooms(){
     // Retain existing mute behavior; the service cannot reliably unmute every model.
     card.append(field('Allow chime while muted',prefs.chime_when_muted,'checkbox',v=>prefs.chime_when_muted=v));
     card.append(node('small','Muted playback depends on the player’s mute behavior.'));
-    card.append(button('Test this room',async()=>{if(dirty)throw Error('Save your changes before testing.');if(!prefs.enabled||!room.available)throw Error('Enable and save this room before testing.');const r=await api('/test/chime?zone='+encodeURIComponent(room.name),{method:'POST'});notice(`${r.status}: ${[...(r.notes||[]),...(r.errors||[]),...(r.skipped||[])].join('; ')||room.name}`);}));
+    card.append(button('Test this room',async()=>{if(dirty)throw Error('Save your changes before testing.');if(!prefs.enabled||!room.available)throw Error('Enable and save this room before testing.');const r=await api('/test/chime?zone='+encodeURIComponent(room.name),{method:'POST'});showTestResult(r);}));
     $('room-list').append(card);
   }
 }
@@ -107,3 +107,10 @@ setInterval(async()=>{
   $('service-status').textContent=JSON.stringify({build:next.build,last_ring:next.last_result},null,2);
  }catch(e){notice(e.message,true);}
 },15000);
+
+function showTestResult(result){
+ const failed=result.status==='error'||Boolean(result.errors?.length);
+ const label=result.status==='chimed'?'Playback command sent':result.status;
+ const details=[...(result.errors||[]),...(result.skipped||[]),...(result.notes||[])];
+ notice(`${label}: ${(result.groups||[]).join(', ')||'no rooms'}${details.length?' — '+details.join('; '):''}`,failed);
+}

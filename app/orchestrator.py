@@ -358,7 +358,7 @@ class DoorbellOrchestrator:
             # Open the queue only now that sound is actually playing.
             async with self._gate:
                 self._accepting = True
-            await self._play_all(live, chime)
+            errors.extend(await self._play_all(live, chime))
 
             # Chimes queued while that played — another doorbell, or the same
             # one pressed again. Played in order, in every group, before any
@@ -372,7 +372,7 @@ class DoorbellOrchestrator:
                     nxt = self._queue.pop(0)
                     self._played.append(nxt.doorbell)
                 log.info("playing queued %s chime", nxt.doorbell)
-                await self._play_all(live, nxt)
+                errors.extend(await self._play_all(live, nxt))
         finally:
             async with self._gate:
                 self._accepting = False
@@ -394,7 +394,7 @@ class DoorbellOrchestrator:
                              f"so {'it' if len(others) == 1 else 'they'} heard the chime too")
 
         return RingResult(
-            status="chimed",
+            status="error" if errors else "chimed",
             doorbells=list(self._played),
             groups=[s.label for s in live],
             skipped=skipped,
@@ -454,7 +454,7 @@ class DoorbellOrchestrator:
             return_exceptions=True,
         )
 
-    async def _play_all(self, live: list[GroupSnapshot], chime: Chime) -> None:
+    async def _play_all(self, live: list[GroupSnapshot], chime: Chime) -> list[str]:
         """Play one chime on every group at once, then wait for it to finish.
 
         Repeats and queued chimes go through here too, at the sequence level —
@@ -463,15 +463,18 @@ class DoorbellOrchestrator:
         """
         url = self.config.chime_url(chime.file)
 
-        async def one(snap: GroupSnapshot) -> None:
+        async def one(snap: GroupSnapshot) -> str | None:
             try:
                 await snap.primary.play_url(url)
             except BluOSError as exc:
                 log.error("%s chime failed on %s: %s", chime.doorbell,
                           snap.primary.name, exc)
+                return f"{chime.doorbell}: {exc}"
+            return None
 
-        await asyncio.gather(*(one(s) for s in live))
+        results = await asyncio.gather(*(one(s) for s in live))
         await asyncio.sleep(chime.total_seconds)
+        return [error for error in results if error is not None]
 
     async def _restore(self, snap: GroupSnapshot) -> None:
         age = time.monotonic() - snap.captured_at
