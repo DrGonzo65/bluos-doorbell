@@ -9,3 +9,6 @@ venv/
 
 # Quarantine for files the remote session could not delete
 _to_delete/
+
+# Browser-managed settings contain the webhook secret
+config/settings.json

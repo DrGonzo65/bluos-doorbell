@@ -26,7 +26,7 @@ STARTER_CONFIG = """\
 # This file was created automatically on first run.
 #
 # You probably don't need to change anything except the webhook token. The
-# service finds your players by itself and chimes in all of them.
+# service finds players automatically; enable rooms in the browser at port 8095.
 #
 # Editing without SSH: this file lives on the appdata share, so you can open it
 # straight from Finder or Explorer at
@@ -72,6 +72,8 @@ discovery:
 
 # Only needed to override a discovered player. Match by name or host and set
 # just the fields you want changed — everything else stays automatic.
+new_room_enabled: false
+
 zones: []
   # - name: Primary Bedroom
   #   chime_when_idle: false    # don't wake a silent room
@@ -146,8 +148,8 @@ def seed_config(config_path: Path) -> bool:
 
     log.warning("=" * 68)
     log.warning("Created a starter config at %s", config_path)
-    log.warning("No zones are configured yet, so nothing will chime.")
-    log.warning("Add your players to it and restart this container.")
+    log.warning("Newly discovered rooms stay silent until enabled in the browser.")
+    log.warning("Open http://<server>:8095/ to choose rooms and sounds.")
     log.warning("=" * 68)
     return True
 

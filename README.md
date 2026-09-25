@@ -1,303 +1,196 @@
 # BluOS Doorbell
 
-A small service that plays a doorbell chime on Bluesound Node players and then
-puts everything back *exactly* the way it was — the right volume in every zone,
-the right track at the right position — including when players are grouped.
+A local service that plays doorbell chimes on BluOS speakers, then restores their
+previous playback and individual volumes. Trigger it with UniFi Protect webhooks
+or another automation that can send an HTTP request.
 
-It finds the players itself. There is no list of IP addresses to maintain.
+Open **`http://<server>:8095/`** to manage everything in the browser. Speakers are
+discovered automatically. **New speakers stay disabled until you enable them.**
+No speaker addresses or chime durations need to be entered in a config file.
 
-Triggered by a UniFi Protect Alarm Manager webhook. No Control4 involvement.
-
-## Why this exists
-
-BluOS has no audio mixer, so a chime always means *interrupt the source, play
-the sound, restore the source*. That part is easy. Doing the restore correctly
-is where the stock drivers fall over, in two specific ways:
-
-**Volume comes back wrong.** On a grouped player, `/Status` returns a copy of
-the *primary's* status — including the primary's volume (API doc §2.2). A
-driver that reads volume from `/Status` and writes it back flattens every zone
-in the group to one level. This service reads each player's own `GET /Volume`
-and restores each one individually with `tell_slaves=0`.
-
-**It fails on grouped players.** Transport commands sent to a group secondary
-are proxied to the primary (§8), so announcing "to the Kitchen" when Kitchen is
-a group member takes over the whole group — and looping over all members fires
-N overlapping takeovers of the same player. This service resolves the topology
-from `/SyncStatus` first and sends exactly one chime per group primary.
-
-There's also a third failure mode worth naming: a **double press**. If the
-"previous volume" is captured on the second press, it captures the *already
-ducked* volume, and the restore leaves everything quiet. An in-flight gate here
-makes that impossible — a ring during an active sequence repeats the chime
-rather than starting a second capture.
-
-## What it does, per ring
-
-1. Reads `/SyncStatus` on every known player and resolves group topology.
-2. Captures `/Status` on each group primary and `/Volume` on every individual
-   member.
-3. Ramps each member down to its chime volume (`tell_slaves=0`).
-4. Sends one `/Play?url=<chime>` per group primary.
-5. Waits for the chime, then restores the source:
-   - play queue → `/Play?id=<song>&seek=<secs>`
-   - radio / service stream → `/Play?url=<captured streamUrl>`
-   - physical input → `/Play?inputTypeIndex=<input>`
-   - was stopped → left stopped
-6. Ramps each member's volume back to its captured level, individually.
-
-## Setup
-
-Running on Unraid? [`unraid/INSTALLING.md`](unraid/INSTALLING.md) covers a
-GUI-only install with no shell access, and [`unraid/UPDATING.md`](unraid/UPDATING.md)
-the update flow — CI publishes an image to GHCR and the box pulls it, so updating
-is one click on the Docker tab. The container seeds its own config and chime on
-first run.
+## Getting started
 
 ```bash
 docker compose up -d --build
 ```
 
-That's the whole setup. The container writes its own `config.yaml`, finds every
-BluOS player on the network, and chimes in all of them. Set a webhook token in
-the config and you're done — there are no IP addresses to enter.
+On Unraid, use the [installation guide](unraid/INSTALLING.md). The container uses
+host networking and persistent folders for `/config` and `/chimes`. It seeds a
+starter configuration and bundled sounds on first launch.
 
-See what it found:
+1. Open `http://<server>:8095/` and unlock with your existing webhook token.
+   A fresh installation uses `change-me` until you replace it in Settings.
+2. In **Rooms**, enable the discovered speakers that should chime. Set each
+   room's volume or leave it blank to use the shared default.
+3. In **Sound library**, upload an MP3 or use a bundled sound. Duration is
+   measured from the file automatically. Preview plays on your browser's device.
+4. In **Doorbells**, choose a sound for the default doorbell. Add another
+   doorbell (for example `back`) and select its own sound.
+5. **Save changes**, then copy each webhook URL into its doorbell automation.
+   Use **Test on speakers** to check the saved configuration.
 
+No restart is needed for room choices, chimes, playback settings, tokens, or
+discovery settings. Changing the server's listening address or port requires a
+container restart; the interface tells you when one is needed.
+
+## Browser settings
+
+- **Rooms:** enable/disable, per-room volume, idle and muted behavior. Rooms
+  appear automatically and the page refreshes its list while there are no
+  unsaved edits. Missing rooms keep their saved preferences.
+- **Doorbells:** add/remove named webhooks, select sounds, set extra settling
+  time, copy authenticated URLs, and test playback.
+- **Sound library:** upload, preview, and delete unused MP3 files. Uploads are
+  limited to 12 MB and 60 seconds. Invalid audio is rejected. Each upload gets
+  a unique filename, so it cannot overwrite a sound currently in use.
+- **Settings:** global volume, fades, debounce, pause restoration, group policy,
+  timeouts, discovery subnet and refresh intervals, service URL, listening
+  address/port, log level, webhook token and allowed devices.
+
+**Grouped speakers share playback.** Disabling one room does not isolate it
+from an enabled room in the same BluOS group. The whole group may hear the
+chime. Ungroup rooms in BluOS if they need independent control. The interface
+shows this limitation next to the room controls. `group_policy: skip` only
+skips a secondary whose primary is not itself a selected room.
+
+The existing mute setting permits attempting playback on a muted group; the
+service does not explicitly unmute the hardware, so audibility depends on the
+player's behavior.
+
+## Where settings live
+
+The discovered player inventory lives in memory and is rebuilt automatically.
+It is **never written into `config.yaml`**. Browser choices are saved atomically
+in `/config/settings.json`, alongside the existing YAML. Keep `/config` and
+`/chimes` on persistent storage and include both in backups.
+
+The YAML supplies initial/default settings. Once saved in the browser,
+`settings.json` takes precedence. The browser uses automatic discovery and
+clears legacy manual zone entries from its managed settings; the original YAML
+is left untouched. Existing YAML room overrides are reflected for discovered
+rooms when first opening the interface. A manually pinned player that cannot
+be discovered is not retained by the browser configuration.
+
+Room preferences use the player's reported MAC address when available, so a
+rename or DHCP address change preserves them. Players without that identity
+use their room name as a fallback; renaming those players requires selecting
+them again. A newly discovered device is disabled by default. The interface
+also offers an explicit option to automatically enable future discoveries.
+
+Settings saves are rejected while a ring is in progress, so a restore cannot
+switch configuration midway through playback. A revision check prevents a
+second browser window from silently overwriting newer settings.
+
+## Two doorbells
+
+The default webhook remains:
+
+```text
+http://<server>:8095/doorbell?token=<your-token>
 ```
-http://<docker-host>:8095/discover?token=<your-token>
+
+An additional doorbell named `back` uses:
+
+```text
+http://<server>:8095/doorbell/back?token=<your-token>
 ```
 
-Then check the service sees everything correctly:
+Both ring the same selected rooms at the same volumes, with different sounds.
+In Protect, create one Alarm Manager rule per camera with a Doorbell Ring
+trigger and an HTTP POST action using its own URL.
+
+If the other doorbell rings during a chime, it queues its sound before the
+original playback is restored. Debounce is per doorbell. Unknown names on
+webhook routes fall back to the default sound and log a warning; the manual
+test endpoint returns a 404 for unknown names.
+
+Changing your webhook token invalidates old URLs. Save the new token and copy
+the replacement URLs into your automations. The browser keeps the login token
+in session storage for the current tab; **Lock settings** clears it.
+
+## How playback works
+
+1. Resolve groups from `/SyncStatus`.
+2. Capture each primary's playback state and every member's own `/Volume`.
+3. Fade members to their chime levels using `tell_slaves=0`.
+4. Send one `/Play?url=...` to each primary. Players fetch the MP3 from this service.
+5. Wait for the measured duration plus settling time, playing any queued chimes.
+6. Restore the source and each individual volume.
+
+Queued tracks resume at the captured position when seek is available. Streams
+reopen their captured URL; physical inputs are reselected. Paused sources are
+paused again after restoration, and stopped players are stopped.
+
+This interrupts audio; it does not mix the chime over continuing music.
+Streaming restoration is source-dependent and may need to buffer. State is
+held in memory, so a process crash cannot recover an interrupted snapshot.
+
+## Discovery and networking
+
+The service listens for LSDP announcements on UDP 11430, periodically queries
+for players, and occasionally sweeps a subnet using HTTP on port 11000.
+The command-line discovery tool additionally supports mDNS.
+
+In the interface, leave the subnet blank for automatic detection or enter a
+CIDR such as `192.168.20.0/24`. Scans larger than a /20 are refused. The **Find
+speakers** button forces a scan, including when no rooms are enabled yet.
+
+Protect must reach the service's HTTP port; the service must reach speakers;
+and speakers must reach the service to download the chime. If automatic URL
+detection picks the wrong interface, set **Player-facing service URL** in the
+browser. Deployment files use host networking for broadcast discovery.
+
+## HTTP endpoints
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /` | Browser interface. |
+| `GET/POST /doorbell` | Default doorbell webhook. |
+| `GET/POST /doorbell/{name}` | Named doorbell webhook. |
+| `GET/POST /test/chime` | Test; accepts `doorbell` and repeated `zone` parameters. |
+| `GET /health` | Public basic status; token unlocks details. |
+| `GET /inspect` | Player state, group topology, and restoration plan. |
+| `GET /discover` | Legacy discovery diagnostics. |
+| `GET /chimes/<file>` | Public audio for the speakers. |
+| `GET/PUT /api/settings` | Browser settings and room inventory. |
+| `POST /api/discovery/refresh` | Browser discovery refresh. |
+| `POST /api/chimes?filename=...` | Raw MP3 upload with automatic duration detection. |
+| `DELETE /api/chimes/{filename}` | Remove an unassigned sound. |
+
+Browser API requests use `X-Doorbell-Token`; writes also require
+`X-Doorbell-Admin: 1`. Webhook/diagnostic routes accept the token as a query
+parameter or header. A blank token disables authentication; the browser warns
+about blank and starter tokens. Audio must remain public for speaker fetching.
+
+## Development and tests
 
 ```bash
-curl -s http://<docker-host>:8095/inspect | jq
-```
-
-`/inspect` shows each player's **own** volume, its group role, and the exact
-`restore_plan` the service would use for its current source. Play something
-different in each zone and re-run it — that's the fastest way to confirm the
-restore logic covers all the sources you actually use.
-
-Fire the whole sequence by hand — every room, or just one:
-
-```
-http://<docker-host>:8095/test/chime?token=<your-token>
-http://<docker-host>:8095/test/chime?token=<your-token>&zone=Kitchen
-```
-
-Both work as plain links in a browser. `zone` matches the room name
-(case-insensitive) or its IP, and can be repeated to test several rooms at once.
-A typo returns a 404 listing the rooms that exist. Rooms you didn't name are
-left completely alone.
-
-Two things the response will tell you rather than leave you guessing:
-
-- **Grouped rooms** — if the room you picked is grouped, BluOS plays the chime
-  through the whole group, and `notes` says which other rooms heard it.
-- **Skipped rooms** — if a room was skipped, `skipped` says why, e.g. it was
-  idle and has `chime_when_idle: false`.
-
-## Wiring up UniFi Protect
-
-In the UniFi Protect app: **Alarm Manager → Create Alarm**
-
-- **Trigger:** Doorbell Ring, scoped to your doorbell camera
-- **Action:** Webhook
-- **URL:** `http://<docker-host>:8095/doorbell?token=<your-token>`
-- **Method:** POST
-
-Ring the doorbell once and check the container logs. If Protect can't reach the
-Docker host, they're probably on different VLANs — either open the firewall for
-that one destination or move the service somewhere both sides can see.
-
-The `webhook.allowed_devices` list is an optional second filter, matched as a
-case-insensitive substring against the Protect payload, so a broader alarm rule
-can't ring the house by accident.
-
-## Endpoints
-
-| Endpoint | Auth | Purpose |
-|---|---|---|
-| `POST /doorbell` | token | Webhook for the default doorbell. Also accepts GET. |
-| `POST /doorbell/<name>` | token | Webhook for a named doorbell, with its own sound. |
-| `GET /health` | open | Status and build stamp. With a token, also players, discovery detail and the last ring. |
-| `GET /inspect` | token | Per-player state, group topology, and restore plans. |
-| `GET /discover` | token | What discovery knows. `?rescan=1` forces a fresh scan. |
-| `GET/POST /test/chime` | token | Run the full sequence, bypassing debounce. `?zone=Kitchen` tests one room, `?doorbell=back` one doorbell's sound. |
-| `GET /chimes/<file>` | open | Serves the chime — the players fetch it and can't authenticate. |
-
-The token goes in `?token=…` or an `X-Doorbell-Token` header, and is compared
-in constant time.
-
-**Set `webhook.token` to something random before you expose this anywhere.**
-The value in the starter config ships inside the public image, so it protects
-nothing; the service logs a loud warning at startup until you change it.
-
-```bash
-python3 -c "import secrets; print(secrets.token_urlsafe(24))"
-```
-
-`/health` is deliberately reachable without a token — the Unraid WebUI link and
-the container healthcheck both need it — but anonymous callers get only a status
-and a build stamp, never player names, addresses or what is playing. Leaving
-`webhook.token` blank disables authentication entirely, which is a real option
-on a trusted VLAN and is warned about at startup.
-
-## Discovery
-
-On by default. The service keeps a live picture of the network from three
-sources, cheapest first:
-
-- a **passive listener** on udp/11430 — BluOS players announce themselves about
-  every 57 seconds, so a newly plugged-in player is picked up within a minute
-- a **periodic LSDP query** asking everything to announce now
-- a **subnet sweep** over HTTP when the first two come back empty, and
-  occasionally afterwards to catch players whose broadcasts don't reach the
-  server
-
-Players that stop answering for 15 minutes are dropped; renames are picked up
-automatically. `GET /health` shows what's known and how each was found.
-
-`zones:` in `config.yaml` is for **exceptions only** — you never list players
-just to include them:
-
-```yaml
-discovery:
-  exclude: ["Garage"]           # never chime here
-
-zones:
-  - name: Primary Bedroom       # matched by name, everything else stays automatic
-    chime_when_idle: false
-    chime_volume: 20
-
-  - name: Back Deck             # a player discovery can't see, pinned by hand
-    host: 192.168.1.60
-```
-
-Set `discovery.auto: false` to ignore the network entirely and use only the
-zones you list.
-
-If discovery finds nothing, it's usually sweeping the wrong network — typically
-because the players are on a different VLAN from the server. `/health` (with the
-token) shows which network it swept; set `discovery.subnet` to the right one as
-CIDR, e.g. `192.168.20.0/24`. Blank means the server's own subnet with its real
-netmask; anything larger than a /20 is refused. Discovery needs host networking; on a bridge network the sweep still works
-but players can't fetch the chime, so host networking is required regardless.
-
-## More than one doorbell
-
-Each doorbell can have its own sound. They all ring the same rooms at the same
-volumes — only the sound differs.
-
-```yaml
-chime:                          # the default doorbell: /doorbell
-  file: doorbell.mp3
-  duration_seconds: 2.3
-
-doorbells:
-  back:                         # /doorbell/back
-    file: back-door.mp3         # bundled: three quick descending notes
-    duration_seconds: 2.05
-```
-
-In UniFi Protect make one Alarm Manager rule per doorbell camera, each posting
-to its own URL — `/doorbell?token=…` for the front, `/doorbell/back?token=…` for
-the back. A name in a URL is matched case-insensitively.
-
-**Both pressed at once.** If one doorbell is pressed while another is still
-chiming, its sound plays right after, in the same duck-and-restore — so you
-hear both, in order, and the music comes back once. A press that lands before
-the first chime has started, or while volumes are being restored, waits for
-that sequence to finish and then gets its own.
-
-**Debounce is per doorbell**, so the back door is never ignored because the
-front door rang a few seconds earlier. Holding one button down gives one extra
-chime, not dozens.
-
-**A mistyped doorbell in a webhook URL still rings** — with the default sound,
-plus a warning in the log naming the doorbells that do exist. A doorbell that
-plays the wrong sound beats one that stays silent. The test endpoint is
-stricter and returns a 404 instead.
-
-`duration_seconds` is required for each extra doorbell rather than inherited:
-a different sound is almost never the same length, and a wrong value either
-clips it or leaves a silent gap. Bundled chimes are added to your chimes folder
-on every start if missing, and never overwrite a file that's already there —
-drop in your own mp3 and point `file` at it.
-
-## Tuning
-
-The settings you'll actually touch are in `config.yaml`:
-
-- **`chime.duration_seconds`** — must match your file's real length. Too short
-  clips the chime; too long leaves a silent gap before the music returns. The
-  bundled `doorbell.mp3` is 2.3s.
-- **`chime.default_volume`** / per-zone `chime_volume` — how loud the chime is,
-  independent of what the music was doing.
-- **`behaviour.fade_ms`** — 300ms feels intentional; 0 is a hard cut.
-- **`behaviour.debounce_seconds`** — rings inside this window are ignored.
-- **`chime_when_idle: false`** — per zone, so a silent bedroom stays silent.
-- **`discovery.exclude`** — players that should never chime.
-
-## Known limits
-
-**No true ducking.** Music cannot continue underneath the chime — BluOS has no
-mixer or overlay bus. What you get is fade down → chime → fade up. Mixing a
-chime over live music would have to happen upstream in an amp or matrix.
-
-**Resume isn't seamless.** Expect a 1–3 second gap while the source re-buffers.
-Local library and play-queue sources restore cleanly. Streaming services vary,
-and live radio can't be seeked at all — it restarts at the live edge. Test each
-source you actually use via `/inspect` before assuming it's fine.
-
-**Groups are all-or-nothing.** If a target zone is a secondary in a group, the
-whole group hears the chime — that's how BluOS routes audio, not a choice this
-service makes. Set `group_policy: skip` if you'd rather leave such groups alone.
-
-## Working on it locally
-
-```bash
-make venv      # create .venv and install dependencies
-make test      # run all four suites
-make discover  # find players on this network
-make run       # run the service against config/config.yaml
-```
-
-Dependencies are version ranges, not exact pins, so they install on whatever
-Python you have. The container pins its base image instead, which is what
-actually makes builds reproducible.
-
-## Tests
-
-```bash
+make venv
 make test
+make run
 ```
 
-Four suites cover the choreography, first-run seeding, the LSDP wire format, and
-the discovery/override merge. The main one runs the full choreography against
-mock BluOS players that reproduce the real quirks — secondaries mirroring the primary's `/Status`, transport commands
-proxying to the primary. Covers queue restore with seek, grouped save/restore,
-double-press, radio streams, idle opt-out, fixed-volume players, and one dead
-player not blocking the rest.
+Open `http://localhost:8095/`. The local run uses `config/config.yaml`,
+`config/settings.json`, and `chimes/`. `DOORBELL_SETTINGS` can override the
+managed-settings path for isolated testing.
 
-## Layout
+Nine suites cover playback, startup seeding, LSDP, discovery, authorization,
+subnets, room tests, multiple doorbells, and browser administration. The latter
+covers room opt-in, identity changes, persistence, measured uploads, invalid
+files, limits, token rotation, conflicting edits, and storage failures.
+Playback suites run against simulated speakers rather than real hardware.
 
-```
-app/__main__.py      entrypoint — binds host/port from config.yaml
-app/bluos.py         BluOS API client
-app/orchestrator.py  capture → duck → chime → restore
-app/config.py        config schema
-app/main.py          FastAPI service and webhook
-app/discovery.py     live player registry: listener, refresh, override merge
-tools/lsdp.py        Lenbrook Service Discovery Protocol (BluOS's own)
-tools/discover.py    player discovery: LSDP, then mDNS, then a subnet sweep
-app/bootstrap.py     first-run seeding of config.yaml and the default chime
-.github/workflows/   CI: run tests, publish the image to GHCR
-Makefile             make venv / test / run / discover / docker
-templates/           Unraid Docker template (also used for a CA listing)
-unraid/              install and update guides, compose files, scripts
-tests/               mock players and end-to-end tests
-chimes/doorbell.mp3  2.3s two-tone chime (default doorbell)
-chimes/back-door.mp3 2.04s three-note chime (for a second doorbell)
-```
+GitHub Actions runs the suites before publishing an AMD64 container to GHCR.
+See [updating on Unraid](unraid/UPDATING.md). Build information is available on
+`/health` and in the browser's service status section.
+
+## Code map
+
+- `app/main.py`: service lifecycle, webhooks, and diagnostics.
+- `app/admin.py`, `app/web/`: settings API and self-contained browser interface.
+- `app/config.py`: configuration models and persisted settings overlay.
+- `app/discovery.py`: live registry, identity lookup, and room preferences.
+- `app/orchestrator.py`: capture, chime queue, and restoration.
+- `app/bluos.py`: async XML API client.
+- `app/bootstrap.py`, `app/__main__.py`: first-run setup and server entrypoint.
+- `tools/`: discovery CLI, LSDP packets, and subnet utilities.

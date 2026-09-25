@@ -31,5 +31,5 @@ services:
 
     labels:
       net.unraid.docker.managed: composeman
-      net.unraid.docker.webui: "http://[IP]:8095/health"
+      net.unraid.docker.webui: "http://[IP]:8095/"
       net.unraid.docker.icon: "https://raw.githubusercontent.com/selfhst/icons/main/png/bell.png"

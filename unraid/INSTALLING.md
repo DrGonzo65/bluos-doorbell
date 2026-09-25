@@ -1,209 +1,69 @@
-# Installing without touching a shell
+# Install on Unraid
 
-Short answer to "can I just get it from Apps?": **yes, eventually — but you
-almost certainly don't need to.** Route 1 below gets you a GUI install and
-one-click updates in about two minutes, with no SSH and no submission process.
-
-The container now seeds its own `config.yaml` and chime on first run, so an
-empty appdata folder is all it needs. That was the only thing that used to
-require a shell.
-
----
-
-## Route 1 — Add Container in the GUI (start here)
-
-No files to copy anywhere. Unraid writes the template for you.
-
-**Docker tab → Add Container**, switch to **Advanced View**, and fill in:
+In **Docker → Add Container → Advanced View**, enter:
 
 | Field | Value |
 |---|---|
 | Name | `bluos-doorbell` |
 | Repository | `ghcr.io/drgonzo65/bluos-doorbell:latest` |
-| Network Type | **Host** |
-| WebUI | `http://[IP]:8095/health` |
+| Network Type | Host |
+| WebUI | `http://[IP]:8095/` |
 
-Add two paths with **Add another Path, Port, Variable**:
+Add these persistent paths, both **Read/Write**:
 
-| Config Type | Name | Container Path | Host Path | Access Mode |
-|---|---|---|---|---|
-| Path | Config | `/config` | `/mnt/user/appdata/bluos-doorbell/config` | **Read/Write** |
-| Path | Chimes | `/chimes` | `/mnt/user/appdata/bluos-doorbell/chimes` | **Read/Write** |
+| Container path | Host path |
+|---|---|
+| `/config` | `/mnt/user/appdata/bluos-doorbell/config` |
+| `/chimes` | `/mnt/user/appdata/bluos-doorbell/chimes` |
 
-Read/Write matters — the container writes the starter config on first run.
+Click **Apply**, then open the WebUI. The container creates starter settings
+and bundled sounds. On a fresh installation, unlock with `change-me`; on an
+existing one, use the webhook token you already configured.
 
-Click **Apply**. It creates the folders, writes a starter `config.yaml`,
-installs the default chime, and comes up reporting `unconfigured`.
+## Configure in the browser
 
-It also finds your players by itself — there are no IPs to enter. The only
-thing you need to change is the webhook token, and you can do it **from Finder**
-because appdata is an SMB share:
+1. Open **Settings → Access & webhook security**, generate a token, and save.
+2. Under **Rooms**, wait for speakers to appear or click **Find speakers**.
+   Enable the rooms you want; new rooms are silent by default.
+3. Upload MP3s under **Sound library**. Duration is detected automatically.
+4. Select a sound for each doorbell. Add another doorbell for another camera.
+5. Save, then copy each webhook URL to its Protect Alarm Manager rule.
 
-```
-\\<tower>\appdata\bluos-doorbell\config\config.yaml
-```
+There is no need to enter speaker IPs, measure audio files, or edit YAML.
+Most changes apply immediately. Only changing the listening address or port
+requires restarting the container. If you change the port, also update the
+Unraid WebUI field to match.
 
-Set `webhook.token` to something random — the shipped default is in the public
-image and protects nothing, and the container logs a warning until you change it:
+## Existing installations
 
-```bash
-python3 -c "import secrets; print(secrets.token_urlsafe(24))"
-```
+Update the image after this version is published. Change your Unraid WebUI
+link from `/health` to `/` to open the settings page. Existing tokens and chime
+choices are loaded from the old configuration. Select your rooms and save.
 
-Save, hit **Restart**, then check
-`http://<tower>:8095/health?token=<your-token>` — it lists every player it
-found. Without the token that page still answers, but shows only a status.
+The browser writes `/config/settings.json`, which takes precedence over the
+old YAML while leaving it untouched. Discovered nodes are never written into
+the YAML. Browser-managed room choices use hardware identity when available.
+Back up both persistent folders.
 
-From then on, **Check for Updates → Apply Update** works exactly like every
-other container, because the Repository field points at a registry tag. Unraid
-saves what you entered as a private template, so this is a one-time setup.
+Rooms that belong to the same BluOS group share audio. A disabled room may
+still hear an enabled group member's chime. Ungroup rooms in BluOS for
+independent control.
 
----
+## If speakers do not appear
 
-## Route 2 — drop the template file on the flash share
+Use **Settings → Network & discovery** to set the subnet, for example
+`192.168.20.0/24`, then save and scan again. Blank means automatic detection;
+the maximum scan is a /20.
 
-Same result as Route 1, but the fields come pre-filled. Still no SSH — the
-flash drive is an SMB share too.
+Allow the service to reach speakers on TCP 11000 and the speakers to reach
+the service on TCP 8095 (or your chosen port). Discovery broadcasts use UDP
+11430. If the players are on another VLAN, the subnet scan can find them when
+HTTP routing is allowed. Set the player-facing service URL if automatic
+address detection chooses the wrong network interface.
 
-1. Copy `templates/bluos-doorbell.xml` in Finder to:
-   ```
-   \\<tower>\flash\config\plugins\dockerMan\templates-user\
-   ```
-3. **Docker → Add Container →** pick `bluos-doorbell` from the **Template**
-   dropdown. Everything is filled in. Click Apply.
+## Updates
 
-If the flash share isn't visible in Finder, it's disabled in **Settings → SMB
-→ Flash share**. Turning it on temporarily is still easier than SSH.
-
----
-
-## Route 3 — a real Community Applications listing
-
-This is the "get it from the Apps tab" answer. It's real, and the process is
-now self-service via [ca.unraid.net/submit](https://ca.unraid.net/submit) — a
-live scan parses your templates and `ca_profile.xml`, shows a preview, and
-flags problems before you submit.
-
-The repo already carries what's needed:
-
-- `LICENSE` — MIT, an OSI-approved licence (required)
-- `ca_profile.xml` — repository metadata (required, at the repo root)
-- `templates/bluos-doorbell.xml` — the app template
-
-**The catch: the repository must be public.** You picked private earlier, and
-that's a fine choice — CA is a public catalogue of apps for everyone, so
-listing there means publishing the project. Only worth it if you actually want
-other BluOS-plus-Unraid owners to find and use this.
-
-If you do go that way:
-
-1. Make the repo public, and the GHCR package public.
-2. Run the live scan at [ca.unraid.net/submit](https://ca.unraid.net/submit)
-   and fix whatever it reports. Treat the portal as the authority on format —
-   the scaffolding here is a starting point, not a guarantee.
-3. Submit and wait for it to land in the catalogue.
-
-What that buys you over Route 1: discoverability for other people, and a
-one-click install on any future Unraid box. What it costs: publishing the
-code, and a moderation round-trip. For a single server, Route 1 gives you the
-identical end state — a GUI-managed container with working update checks.
-
----
-
-## Which to pick
-
-| | Route 1 | Route 2 | Route 3 |
-|---|---|---|---|
-| SSH needed | no | no | no |
-| Setup time | ~2 min | ~2 min | days, incl. review |
-| Repo can stay private | yes | yes | **no** |
-| Shows in Apps tab | no | no | yes |
-| Update button works | yes | yes | yes |
-
-Route 1 unless you specifically want to publish this for other people.
-
----
-
-## Two doorbells
-
-To give a second doorbell its own sound, add it to `config.yaml` over the SMB
-share and restart — the bundled `back-door.mp3` is already in your chimes
-folder:
-
-```yaml
-doorbells:
-  back:
-    file: back-door.mp3
-    duration_seconds: 2.05
-```
-
-Then in UniFi Protect → **Alarm Manager**, make one rule per doorbell camera:
-
-| Rule | Trigger | Webhook URL |
-|---|---|---|
-| Front door | Doorbell Ring, front camera | `http://<tower>:8095/doorbell?token=<your-token>` |
-| Back door | Doorbell Ring, back camera | `http://<tower>:8095/doorbell/back?token=<your-token>` |
-
-Try each sound without anyone at the door:
-`http://<tower>:8095/test/chime?token=<your-token>&doorbell=back` — add
-`&zone=Kitchen` to hear it in one room only.
-
-## Checking which players it found
-
-Discovery runs on its own, so this is for looking, not configuring:
-
-```
-http://<tower>:8095/discover?token=<your-token>
-```
-
-Add `&rescan=1` to force a fresh scan if you just plugged a player in and don't
-want to wait for the next refresh.
-
-If it comes back with `count: 0`, it probably swept the wrong network. The
-response shows what it swept (`subnet`) and why (`subnet_source`) — if your
-players are on a different VLAN from Unraid, that's the usual cause. Set the
-network they're actually on, as CIDR:
-
-```yaml
-discovery:
-  subnet: "192.168.20.0/24"
-```
-
-Or try one first without editing anything:
-`/discover?token=<your-token>&rescan=1&subnet=192.168.20.0/24`.
-
-Left blank, it uses Unraid's own subnet with its real netmask, so a /23 or /22
-LAN is covered in full. Anything larger than a /20 is refused, since sweeping
-thousands of addresses would take ages and look like a port scan.
-
-### If discovery finds nothing anywhere
-
-You can always pin a player by hand — the service talks to players over ordinary
-HTTP, so an IP typed into `zones:` works exactly as well as a discovered one. Get IPs from the BluOS app under
-**Settings → Player → Network**, and confirm reachability with:
-
-```bash
-curl http://<player-ip>:11000/SyncStatus
-```
-
-If that returns XML, add it to `config.yaml` and restart:
-
-```yaml
-zones:
-  - name: Back Deck
-    host: 192.168.1.60
-```
-
-Common reasons broadcast discovery comes back empty:
-
-- **macOS 15+ Local Network permission.** Terminal needs to be allowed under
-  System Settings → Privacy & Security → Local Network. Without it, multicast
-  and broadcast are silently dropped and every discovery tool returns nothing.
-- **BluOS doesn't reliably advertise over mDNS.** Bluesound uses their own
-  protocol (LSDP, UDP 11430), which is why a Bonjour browse can be empty with
-  players sitting right there. The tool tries LSDP first now.
-- **Client isolation / multicast filtering** on the WiFi SSID the players are
-  joined to. UniFi calls it "Client Device Isolation" and Multicast Enhancement.
-- **Different VLANs.** Broadcast and mDNS don't route. The subnet sweep still
-  works if the VLANs can reach each other over HTTP — set `discovery.subnet` to
-  the players' VLAN, e.g. `192.168.20.0/24`.
+The repository includes the browser interface, but your running container only
+gets it after a new image is published and installed. Use **Check for Updates →
+Apply Update** once that image is available. Config and audio persist across
+updates. See [UPDATING.md](UPDATING.md) for the build and release flow.

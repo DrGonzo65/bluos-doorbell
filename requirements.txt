@@ -10,3 +10,6 @@ PyYAML>=6.0,<7.0
 # Optional: only used by the mDNS fallback in tools/discover.py. Discovery
 # works without it via LSDP and the subnet sweep.
 zeroconf>=0.136,<1.0
+
+# Read MP3 duration from the audio itself for uploads and settings.
+mutagen>=1.47,<2

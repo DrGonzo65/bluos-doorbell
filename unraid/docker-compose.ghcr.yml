@@ -26,4 +26,4 @@ services:
 
     labels:
       net.unraid.docker.managed: composeman
-      net.unraid.docker.webui: "http://[IP]:8095/health"
+      net.unraid.docker.webui: "http://[IP]:8095/"

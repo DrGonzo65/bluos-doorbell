@@ -8,7 +8,7 @@ on every push to `main` and publishes it to GHCR; Unraid pulls that image.
   git push  ──▶  test, then build  ──▶  ghcr.io/drgonzo65/...  ──▶  Apply Update
 ```
 
-Config and chimes live in `/mnt/user/appdata/bluos-doorbell/`, mounted into the
+Browser settings (settings.json), initial config, and chimes live in `/mnt/user/appdata/bluos-doorbell/`, mounted into the
 container. An update replaces the code and never touches them.
 
 ---

@@ -57,6 +57,9 @@ jobs:
       - name: Multiple doorbells
         run: python -m tests.test_doorbells
 
+      - name: Browser settings, uploads, and persistence
+        run: python -m tests.test_admin
+
       - name: Validate the Unraid template and config sample
         run: |
           python -c "import xml.etree.ElementTree as ET; ET.parse('templates/bluos-doorbell.xml')"

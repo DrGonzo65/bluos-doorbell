@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from .config import Config, ZoneConfig
+from .bluos import BluOSPlayer, BluOSError
 from tools import lsdp
 from tools.discover import discover_sweep, probe
 from tools.netutil import SubnetError, resolve
@@ -39,6 +40,11 @@ class DiscoveredPlayer:
     source: str = "lsdp"          # lsdp | sweep | listener
     port: int = 11000
     last_seen: float = field(default_factory=time.monotonic)
+    mac: str = ""
+
+    @property
+    def key(self) -> str:
+        return "mac:" + self.mac if self.mac else "name:" + self.name.strip().casefold()
 
     @property
     def age_seconds(self) -> float:
@@ -85,7 +91,10 @@ class PlayerRegistry:
             await self._start_listener()
 
         # Discover once before serving, so the very first ring has targets.
-        await self.refresh(force_sweep=True)
+        try:
+            await self.refresh(force_sweep=True)
+        except Exception as exc:
+            log.warning("initial discovery failed; will retry: %s", exc)
         self._tasks.append(asyncio.create_task(self._refresh_loop()))
 
     async def stop(self) -> None:
@@ -123,9 +132,8 @@ class PlayerRegistry:
         log.info("listening for player announcements on udp/%d", lsdp.PORT)
 
     async def _refresh_loop(self) -> None:
-        interval = max(30.0, self.config.discovery.refresh_seconds)
         while True:
-            await asyncio.sleep(interval)
+            await asyncio.sleep(max(30.0, self.config.discovery.refresh_seconds))
             try:
                 await self.refresh()
             except asyncio.CancelledError:
@@ -185,6 +193,7 @@ class PlayerRegistry:
                     for host, name, detail in await discover_sweep(network):
                         self.note(host, name, detail, "sweep")
 
+            await self._identify_players()
             self._refreshes += 1
             self.last_refresh = time.monotonic()
 
@@ -195,6 +204,32 @@ class PlayerRegistry:
             elif not self.players:
                 log.warning("no players found — check the subnet, or list them "
                             "manually under zones: in config.yaml")
+
+    async def _identify_players(self) -> None:
+        # MAC addresses preserve room choices across DHCP changes and renames.
+        async def identify(player):
+            try:
+                sync = await BluOSPlayer(player.host, player.port, client=self.client).sync_status()
+                player.mac = (sync.mac or "").replace(":", "").replace("-", "").lower()
+            except BluOSError:
+                pass
+        await asyncio.gather(*(identify(p) for p in list(self.players.values())))
+
+    def room_zone(self, player: DiscoveredPlayer) -> ZoneConfig:
+        zone = ZoneConfig(name=player.name, host=player.host, port=player.port,
+                          enabled=self.config.new_room_enabled)
+        for override in self.config.zones:
+            if override.matches(player.name, player.host):
+                for key in override.model_fields_set - {"name", "host", "port"}:
+                    setattr(zone, key, getattr(override, key))
+        if self.config.discovery.is_excluded(player.name, player.host):
+            zone.enabled = False
+        prefs = self.config.room_preferences
+        pref = prefs.get(player.key) or prefs.get("name:" + player.name.strip().casefold())
+        if pref:
+            for key in ("enabled", "chime_volume", "chime_when_idle", "chime_when_muted"):
+                setattr(zone, key, getattr(pref, key))
+        return zone
 
     def _lsdp_query(self, timeout: float) -> tuple[list[tuple[str, str, str]], str | None]:
         """Send a query and collect replies on a throwaway socket.
@@ -259,6 +294,9 @@ class PlayerRegistry:
                     if "name" in override.model_fields_set and override.name:
                         zone.name = override.name
 
+                managed = self.room_zone(player)
+                for key in ("enabled", "chime_volume", "chime_when_idle", "chime_when_muted"):
+                    setattr(zone, key, getattr(managed, key))
                 if zone.enabled:
                     out.append(zone)
 

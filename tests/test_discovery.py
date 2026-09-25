@@ -32,6 +32,7 @@ def check(label: str, condition: bool, detail: str = "") -> None:
 
 def registry_with(config: Config, discovered: dict[str, str]) -> PlayerRegistry:
     """A registry pre-populated as if discovery had already run."""
+    config.new_room_enabled = True  # exercise the optional enable-new-rooms policy
     reg = PlayerRegistry(config, httpx.AsyncClient())
     for host, name in discovered.items():
         reg.note(host, name, "PowerNode", "lsdp")
@@ -159,6 +160,7 @@ def test_end_to_end_auto():
 
     async def run():
         cfg = Config.model_validate({
+            "new_room_enabled": True,
             "service_base_url": "http://127.0.0.1:9999",
             "chime": {"duration_seconds": 0.05, "tail_seconds": 0.02},
             "behaviour": {"debounce_seconds": 0, "fade_ms": 0},

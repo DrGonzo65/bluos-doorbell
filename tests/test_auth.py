@@ -38,6 +38,7 @@ def check(label: str, condition: bool, detail: str = "") -> None:
 def client_with(token: str) -> TestClient:
     """A client over the real app, with state wired up by hand (no lifespan)."""
     cfg = Config.model_validate({
+        "new_room_enabled": True,
         "webhook": {"token": token},
         "discovery": {"auto": True},
     })

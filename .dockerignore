@@ -3,3 +3,7 @@ __pycache__/
 tests/
 config/config.yaml
 .git/
+
+config/settings.json
+.venv/
+_to_delete/

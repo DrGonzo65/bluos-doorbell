@@ -59,7 +59,7 @@ docker run -d \
     -e DOORBELL_CHIME_DIR=/chimes \
     -e TZ="${TZ:-America/Los_Angeles}" \
     -l net.unraid.docker.managed=dockerman \
-    -l net.unraid.docker.webui='http://[IP]:8095/health' \
+    -l net.unraid.docker.webui='http://[IP]:8095/' \
     -v "$APPDATA/config:/config" \
     -v "$APPDATA/chimes:/chimes" \
     "$NAME:latest" >/dev/null

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 import re
 import socket
 from dataclasses import dataclass
@@ -30,7 +31,7 @@ class ZoneConfig(BaseModel):
 
     #: Volume (0-100) the chime plays at in this zone. Falls back to the
     #: global default when unset.
-    chime_volume: int | None = None
+    chime_volume: int | None = Field(default=None, ge=0, le=100)
 
     #: Set false to keep a zone configured but temporarily silent.
     enabled: bool = True
@@ -83,7 +84,7 @@ class DiscoveryConfig(BaseModel):
 
     #: How often to re-run discovery. Players that move or get renamed are
     #: picked up within this window without a restart.
-    refresh_seconds: float = 300.0
+    refresh_seconds: float = Field(default=300.0, ge=30, le=86400)
 
     #: Keep a socket open for the announcements players broadcast every ~57s,
     #: so a newly plugged-in player appears within about a minute.
@@ -91,7 +92,7 @@ class DiscoveryConfig(BaseModel):
 
     #: A full subnet sweep is heavier than an LSDP query, so only do one every
     #: Nth refresh — or immediately whenever nothing is known yet.
-    full_sweep_every: int = 12
+    full_sweep_every: int = Field(default=12, ge=0, le=1000)
 
     #: Names or IPs never to chime, matched case-insensitively.
     exclude: list[str] = Field(default_factory=list)
@@ -111,13 +112,13 @@ class ChimeConfig(BaseModel):
     #: How long the chime runs, in seconds. The service waits this long before
     #: restoring. Measure your file and set this accurately — too short cuts
     #: the chime off, too long leaves a silent gap.
-    duration_seconds: float = 3.0
+    duration_seconds: float = Field(default=3.0, gt=0, le=60)
 
     #: Extra settling time after the chime before restoring the source.
-    tail_seconds: float = 0.8
+    tail_seconds: float = Field(default=0.8, ge=0, le=10)
 
     #: Default chime volume for zones that don't override it.
-    default_volume: int = 30
+    default_volume: int = Field(default=30, ge=0, le=100)
 
 
 #: The doorbell `chime:` describes, and what a bare /doorbell rings.
@@ -164,15 +165,15 @@ class BehaviourConfig(BaseModel):
     #: doorbell, so a second doorbell is never swallowed by the first. Presses
     #: during a chime are queued, not debounced; the in-flight gate is what
     #: stops a second capture from saving the ducked volume.
-    debounce_seconds: float = 8.0
+    debounce_seconds: float = Field(default=8.0, ge=0, le=300)
 
     #: Milliseconds to ramp volume down and back up. 0 disables ramping.
-    fade_ms: int = 300
-    fade_steps: int = 4
+    fade_ms: int = Field(default=300, ge=0, le=5000)
+    fade_steps: int = Field(default=4, ge=1, le=100)
 
     #: If a captured state is older than this, discard it rather than restoring
     #: something stale after a crash or hang.
-    state_ttl_seconds: float = 120.0
+    state_ttl_seconds: float = Field(default=120.0, ge=10, le=3600)
 
     #: What to do when a target zone is a secondary in a group whose primary is
     #: not itself a target.
@@ -184,7 +185,7 @@ class BehaviourConfig(BaseModel):
     restore_pause_state: bool = True
 
     #: Per-request timeout when talking to a player.
-    http_timeout_seconds: float = 5.0
+    http_timeout_seconds: float = Field(default=5.0, gt=0, le=60)
 
 
 class WebhookConfig(BaseModel):
@@ -198,12 +199,22 @@ class WebhookConfig(BaseModel):
     allowed_devices: list[str] = Field(default_factory=list)
 
 
+class RoomPreference(BaseModel):
+    """Saved choices for an automatically discovered room, never an address list."""
+
+    name: str = ""
+    enabled: bool = True
+    chime_volume: int | None = Field(default=None, ge=0, le=100)
+    chime_when_idle: bool = True
+    chime_when_muted: bool = False
+
+
 class Config(BaseModel):
     #: Base URL the PLAYERS use to fetch the chime — must be reachable from
     #: the players' VLAN. Auto-detected from the host's primary IP if unset.
     service_base_url: str = ""
     listen_host: str = "0.0.0.0"
-    listen_port: int = 8095
+    listen_port: int = Field(default=8095, ge=1, le=65535)
 
     #: Overrides layered on top of discovery — see ZoneConfig.
     zones: list[ZoneConfig] = Field(default_factory=list)
@@ -216,7 +227,18 @@ class Config(BaseModel):
     behaviour: BehaviourConfig = Field(default_factory=BehaviourConfig)
     webhook: WebhookConfig = Field(default_factory=WebhookConfig)
 
-    log_level: str = "INFO"
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
+    room_preferences: dict[str, RoomPreference] = Field(default_factory=dict)
+    new_room_enabled: bool = False
+
+    @field_validator("service_base_url")
+    @classmethod
+    def _valid_base_url(cls, value: str) -> str:
+        from urllib.parse import urlsplit
+        if value and (urlsplit(value).scheme not in ("http", "https")
+                      or not urlsplit(value).hostname):
+            raise ValueError("Use a complete http:// or https:// address")
+        return value.rstrip("/")
 
     #: Zero zones is legal — with discovery on, that is the normal case. The
     #: service finds its own players and only crash-loops if you insist on
@@ -304,4 +326,14 @@ def load_config(path: str | Path | None = None) -> Config:
         )
     with path.open("r", encoding="utf-8") as fh:
         raw = yaml.safe_load(fh) or {}
+    managed = settings_path(path)
+    if managed.exists():
+        raw.update(json.loads(managed.read_text(encoding="utf-8")))
     return Config.model_validate(raw)
+
+
+def settings_path(config_path: Path | None = None) -> Path:
+    """UI preferences share the persistent config volume without editing YAML."""
+    if os.environ.get("DOORBELL_SETTINGS"):
+        return Path(os.environ["DOORBELL_SETTINGS"])
+    return (config_path or Path(os.environ.get("DOORBELL_CONFIG", "/config/config.yaml"))).with_name("settings.json")

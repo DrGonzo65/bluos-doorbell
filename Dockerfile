@@ -32,8 +32,8 @@ ENV DOORBELL_DEFAULTS=/srv/defaults \
 EXPOSE 8095
 
 HEALTHCHECK --interval=60s --timeout=5s --start-period=10s --retries=3 \
-  CMD python -c "import os,urllib.request,yaml; \
-p=yaml.safe_load(open(os.environ['DOORBELL_CONFIG'])).get('listen_port',8095); \
+  CMD python -c "import urllib.request; \
+from app.config import load_config; p=load_config().listen_port; \
 urllib.request.urlopen(f'http://127.0.0.1:{p}/health', timeout=4)" || exit 1
 
 CMD ["python", "-m", "app"]

@@ -45,6 +45,7 @@ async def lifespan(app: FastAPI):
 
     client = httpx.AsyncClient(timeout=config.behaviour.http_timeout_seconds)
     registry = PlayerRegistry(config, client)
+    state["bound_address"] = (config.listen_host, config.listen_port)
     state["config"] = config
     state["client"] = client
     state["registry"] = registry
@@ -93,6 +94,8 @@ async def lifespan(app: FastAPI):
     zones = _orchestrator().target_zones()
     if zones:
         log.info("  zones:     %s", ", ".join(z.name for z in zones))
+    elif registry.players:
+        log.info("  Players discovered; open the browser interface to enable rooms.")
     else:
         log.warning("  NO PLAYERS FOUND YET — discovery keeps trying in the "
                     "background. Check GET /discover, or list them under "
@@ -108,8 +111,15 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="BluOS Doorbell", version="1.0.0", lifespan=lifespan)
 router = APIRouter()
 
-if CHIME_DIR.exists():
-    app.mount("/chimes", StaticFiles(directory=str(CHIME_DIR)), name="chimes")
+
+@app.middleware("http")
+async def private_settings_responses(request: Request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+app.mount("/chimes", StaticFiles(directory=str(CHIME_DIR), check_dir=False), name="chimes")
 
 
 def _config() -> Config:
@@ -135,7 +145,7 @@ def _token_ok(token: str | None, header_token: str | None) -> bool:
     if not expected:
         return False
     for candidate in (token, header_token):
-        if candidate is not None and hmac.compare_digest(candidate, expected):
+        if candidate is not None and hmac.compare_digest(candidate.encode("utf-8"), expected.encode("utf-8")):
             return True
     return False
 
@@ -257,7 +267,8 @@ async def health(
     zones = orch.target_zones()
 
     basic = {
-        "status": "ok" if zones else "no-players",
+        "status": "ok" if zones else ("no-enabled-rooms" if state.get("registry")
+                                        and state["registry"].players else "no-players"),
         "build": BUILD,
         "zones": len(zones),
     }
@@ -486,3 +497,7 @@ async def test_chime(
 
 
 app.include_router(router)
+
+# Keep the browser API separate from the speaker/webhook routes.
+from .admin import router as admin_router
+app.include_router(admin_router)
