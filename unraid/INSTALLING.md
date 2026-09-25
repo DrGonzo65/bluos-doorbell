@@ -124,6 +124,30 @@ Route 1 unless you specifically want to publish this for other people.
 
 ---
 
+## Two doorbells
+
+To give a second doorbell its own sound, add it to `config.yaml` over the SMB
+share and restart — the bundled `back-door.mp3` is already in your chimes
+folder:
+
+```yaml
+doorbells:
+  back:
+    file: back-door.mp3
+    duration_seconds: 2.05
+```
+
+Then in UniFi Protect → **Alarm Manager**, make one rule per doorbell camera:
+
+| Rule | Trigger | Webhook URL |
+|---|---|---|
+| Front door | Doorbell Ring, front camera | `http://<tower>:8095/doorbell?token=<your-token>` |
+| Back door | Doorbell Ring, back camera | `http://<tower>:8095/doorbell/back?token=<your-token>` |
+
+Try each sound without anyone at the door:
+`http://<tower>:8095/test/chime?token=<your-token>&doorbell=back` — add
+`&zone=Kitchen` to hear it in one room only.
+
 ## Checking which players it found
 
 Discovery runs on its own, so this is for looking, not configuring:

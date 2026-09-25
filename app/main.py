@@ -40,6 +40,7 @@ async def lifespan(app: FastAPI):
     logging.basicConfig(
         level=getattr(logging, config.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+        force=True,   # replace the early handler __main__ set up for seeding
     )
 
     client = httpx.AsyncClient(timeout=config.behaviour.http_timeout_seconds)
@@ -49,10 +50,11 @@ async def lifespan(app: FastAPI):
     state["registry"] = registry
     state["orchestrator"] = DoorbellOrchestrator(config, client, registry)
 
-    chime_path = CHIME_DIR / config.chime.file
-    if not chime_path.exists():
-        log.warning("chime file %s not found — the chime will fail until it exists",
-                    chime_path)
+    for chime in config.all_chimes():
+        if not (CHIME_DIR / chime.file).exists():
+            log.warning("%s doorbell: chime file %s not found — it will ring "
+                        "silence until the file exists", chime.doorbell,
+                        CHIME_DIR / chime.file)
 
     log.info("BluOS doorbell service ready (build %s, %s)",
              BUILD["git_sha"][:12], BUILD["built_at"])
@@ -61,8 +63,11 @@ async def lifespan(app: FastAPI):
     else:
         log.info("  discovery: off — using the %d configured zone(s)",
                  len(config.enabled_zones()))
-    log.info("  chime url: %s", config.chime_url())
-    log.info("  webhook:   %s/doorbell", config.resolved_base_url())
+    base = config.resolved_base_url()
+    for chime in config.all_chimes():
+        path = "/doorbell" if chime.doorbell == "default" else f"/doorbell/{chime.doorbell}"
+        log.info("  doorbell:  %-10s %s%s  -> %s (%.1fs)", chime.doorbell, base,
+                 path, chime.file, chime.duration_seconds)
     if config.webhook.token in DEFAULT_TOKENS:
         log.warning("=" * 68)
         if not config.webhook.token:
@@ -176,14 +181,9 @@ def _device_allowed(payload: dict[str, Any]) -> bool:
     return any(a.lower() in joined for a in allowed)
 
 
-@router.api_route("/doorbell", methods=["GET", "POST"])
-async def doorbell(
-    request: Request,
-    token: str | None = Query(default=None),
-    x_doorbell_token: str | None = Header(default=None),
-):
-    """Webhook target for UniFi Protect Alarm Manager (or anything else)."""
-    _check_token(token, x_doorbell_token)
+async def _handle_ring(request: Request, name: str | None,
+                       token: str | None, header_token: str | None) -> JSONResponse:
+    _check_token(token, header_token)
 
     payload: dict[str, Any] = {}
     if request.method == "POST":
@@ -199,10 +199,49 @@ async def doorbell(
                  payload.get("deviceName") or payload.get("device") or "unknown")
         return JSONResponse({"status": "ignored", "reason": "device not allowlisted"})
 
-    source = payload.get("deviceName") or payload.get("alarm") or request.client.host \
-        if request.client else "webhook"
-    result = await _orchestrator().ring(source=str(source))
+    config = _config()
+    chime = config.chime_for(name)
+    notes: list[str] = []
+    if chime is None:
+        # A doorbell that rings the wrong sound beats one that doesn't ring.
+        # Ring the default chime, and make the mistake loud in the log.
+        known = ", ".join(c.doorbell for c in config.all_chimes())
+        log.warning("webhook for unknown doorbell %r — ringing the default chime. "
+                    "Known doorbells: %s. Check the URL in Protect or add it "
+                    "under doorbells: in config.yaml.", name, known)
+        chime = config.chime_for(None)
+        notes.append(f"unknown doorbell {name!r} — rang the default chime instead")
+
+    device = payload.get("deviceName") or payload.get("device")
+    source = str(device) if isinstance(device, str) and device else (
+        request.client.host if request.client else "webhook")
+
+    result = await _orchestrator().ring(source=f"{chime.doorbell} via {source}",
+                                        chime=chime)
+    result.notes = notes + result.notes
     return JSONResponse(result.as_dict())
+
+
+@router.api_route("/doorbell", methods=["GET", "POST"])
+async def doorbell(
+    request: Request,
+    token: str | None = Query(default=None),
+    x_doorbell_token: str | None = Header(default=None),
+):
+    """Webhook for the default doorbell (the sound under `chime:`)."""
+    return await _handle_ring(request, None, token, x_doorbell_token)
+
+
+@router.api_route("/doorbell/{name}", methods=["GET", "POST"])
+async def named_doorbell(
+    name: str,
+    request: Request,
+    token: str | None = Query(default=None),
+    x_doorbell_token: str | None = Header(default=None),
+):
+    """Webhook for a specific doorbell, e.g. /doorbell/back — its own sound,
+    the same rooms. Point each Protect alarm at its doorbell's URL."""
+    return await _handle_ring(request, name, token, x_doorbell_token)
 
 
 @router.get("/health")
@@ -233,6 +272,12 @@ async def health(
         "zone_names": [z.name for z in zones],
         "discovery": registry.status() if registry else None,
         "chime_url": _config().chime_url(),
+        "doorbells": [
+            {"name": c.doorbell, "file": c.file,
+             "duration_seconds": c.duration_seconds,
+             "file_present": (CHIME_DIR / c.file).exists()}
+            for c in _config().all_chimes()
+        ],
         "last_result": orch.last_result.as_dict() if orch.last_result else None,
     }
 
@@ -391,16 +436,27 @@ async def test_chime(
         default=None,
         description="Room(s) to test, by name or IP. Repeat for several; "
                     "omit to test every room."),
+    doorbell: str | None = Query(
+        default=None,
+        description="Which doorbell's sound to play; omit for the default."),
     token: str | None = Query(default=None),
     x_doorbell_token: str | None = Header(default=None),
 ):
     """Fire the full sequence by hand, bypassing the debounce window.
 
     GET works too, so a test is a link you can open in a browser:
-        /test/chime?token=...&zone=Kitchen
+        /test/chime?token=...&zone=Kitchen&doorbell=back
     """
     _check_token(token, x_doorbell_token)
     orch = _orchestrator()
+
+    chime = _config().chime_for(doorbell)
+    if chime is None:
+        # Interactive, so a typo should say so rather than ring something else.
+        raise HTTPException(status_code=404, detail={
+            "error": f"no such doorbell: {doorbell}",
+            "doorbells": [c.doorbell for c in _config().all_chimes()],
+        })
 
     only = None
     if zone:
@@ -421,8 +477,8 @@ async def test_chime(
                 "rooms": sorted(z.name for z in known),
             })
 
-    orch._last_ring = -1e9  # noqa: SLF001 - deliberate test escape hatch
-    result = await orch.ring(source="manual test", only=only)
+    orch.reset_debounce()
+    result = await orch.ring(source="manual test", only=only, chime=chime)
     out = result.as_dict()
     if only:
         out["tested"] = [z.name for z in only]

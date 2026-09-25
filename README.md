@@ -119,11 +119,12 @@ can't ring the house by accident.
 
 | Endpoint | Auth | Purpose |
 |---|---|---|
-| `POST /doorbell` | token | Webhook target. Also accepts GET. |
+| `POST /doorbell` | token | Webhook for the default doorbell. Also accepts GET. |
+| `POST /doorbell/<name>` | token | Webhook for a named doorbell, with its own sound. |
 | `GET /health` | open | Status and build stamp. With a token, also players, discovery detail and the last ring. |
 | `GET /inspect` | token | Per-player state, group topology, and restore plans. |
 | `GET /discover` | token | What discovery knows. `?rescan=1` forces a fresh scan. |
-| `GET/POST /test/chime` | token | Run the full sequence, bypassing debounce. `?zone=Kitchen` tests one room. |
+| `GET/POST /test/chime` | token | Run the full sequence, bypassing debounce. `?zone=Kitchen` tests one room, `?doorbell=back` one doorbell's sound. |
 | `GET /chimes/<file>` | open | Serves the chime — the players fetch it and can't authenticate. |
 
 The token goes in `?token=…` or an `X-Doorbell-Token` header, and is compared
@@ -183,6 +184,47 @@ token) shows which network it swept; set `discovery.subnet` to the right one as
 CIDR, e.g. `192.168.20.0/24`. Blank means the server's own subnet with its real
 netmask; anything larger than a /20 is refused. Discovery needs host networking; on a bridge network the sweep still works
 but players can't fetch the chime, so host networking is required regardless.
+
+## More than one doorbell
+
+Each doorbell can have its own sound. They all ring the same rooms at the same
+volumes — only the sound differs.
+
+```yaml
+chime:                          # the default doorbell: /doorbell
+  file: doorbell.mp3
+  duration_seconds: 2.3
+
+doorbells:
+  back:                         # /doorbell/back
+    file: back-door.mp3         # bundled: three quick descending notes
+    duration_seconds: 2.05
+```
+
+In UniFi Protect make one Alarm Manager rule per doorbell camera, each posting
+to its own URL — `/doorbell?token=…` for the front, `/doorbell/back?token=…` for
+the back. A name in a URL is matched case-insensitively.
+
+**Both pressed at once.** If one doorbell is pressed while another is still
+chiming, its sound plays right after, in the same duck-and-restore — so you
+hear both, in order, and the music comes back once. A press that lands before
+the first chime has started, or while volumes are being restored, waits for
+that sequence to finish and then gets its own.
+
+**Debounce is per doorbell**, so the back door is never ignored because the
+front door rang a few seconds earlier. Holding one button down gives one extra
+chime, not dozens.
+
+**A mistyped doorbell in a webhook URL still rings** — with the default sound,
+plus a warning in the log naming the doorbells that do exist. A doorbell that
+plays the wrong sound beats one that stays silent. The test endpoint is
+stricter and returns a 404 instead.
+
+`duration_seconds` is required for each extra doorbell rather than inherited:
+a different sound is almost never the same length, and a wrong value either
+clips it or leaves a silent gap. Bundled chimes are added to your chimes folder
+on every start if missing, and never overwrite a file that's already there —
+drop in your own mp3 and point `file` at it.
 
 ## Tuning
 
@@ -256,5 +298,6 @@ Makefile             make venv / test / run / discover / docker
 templates/           Unraid Docker template (also used for a CA listing)
 unraid/              install and update guides, compose files, scripts
 tests/               mock players and end-to-end tests
-chimes/doorbell.mp3  2.3s two-tone chime
+chimes/doorbell.mp3  2.3s two-tone chime (default doorbell)
+chimes/back-door.mp3 2.04s three-note chime (for a second doorbell)
 ```

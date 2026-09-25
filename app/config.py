@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import re
 import socket
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -118,9 +120,50 @@ class ChimeConfig(BaseModel):
     default_volume: int = 30
 
 
+#: The doorbell `chime:` describes, and what a bare /doorbell rings.
+DEFAULT_DOORBELL = "default"
+
+_DOORBELL_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
+
+
+class DoorbellConfig(BaseModel):
+    """An additional doorbell with its own sound.
+
+    It rings the same rooms at the same volumes as every other doorbell — only
+    the sound differs. Its webhook is /doorbell/<name>.
+    """
+
+    #: Filename inside the chimes directory.
+    file: str
+
+    #: Length of THIS file, in seconds. Required rather than inherited from
+    #: `chime:`, because a different sound is almost never the same length and
+    #: a wrong value either clips it or leaves a silent gap.
+    duration_seconds: float = Field(gt=0, le=60)
+
+    #: Settling time after the chime. Defaults to chime.tail_seconds.
+    tail_seconds: float | None = Field(default=None, ge=0, le=10)
+
+
+@dataclass(frozen=True)
+class Chime:
+    """A doorbell's sound, fully resolved — what the orchestrator plays."""
+
+    doorbell: str
+    file: str
+    duration_seconds: float
+    tail_seconds: float
+
+    @property
+    def total_seconds(self) -> float:
+        return self.duration_seconds + self.tail_seconds
+
+
 class BehaviourConfig(BaseModel):
-    #: Ignore repeat rings inside this window. Prevents a double-press from
-    #: capturing the ducked volume as "previous" — the classic restore bug.
+    #: Ignore repeat rings of the SAME doorbell inside this window. Counted per
+    #: doorbell, so a second doorbell is never swallowed by the first. Presses
+    #: during a chime are queued, not debounced; the in-flight gate is what
+    #: stops a second capture from saving the ducked volume.
     debounce_seconds: float = 8.0
 
     #: Milliseconds to ramp volume down and back up. 0 disables ramping.
@@ -165,7 +208,11 @@ class Config(BaseModel):
     #: Overrides layered on top of discovery — see ZoneConfig.
     zones: list[ZoneConfig] = Field(default_factory=list)
     discovery: DiscoveryConfig = Field(default_factory=DiscoveryConfig)
+    #: The default doorbell's sound — what /doorbell rings.
     chime: ChimeConfig = Field(default_factory=ChimeConfig)
+    #: Further doorbells, each with its own sound, keyed by the name used in
+    #: its webhook URL: /doorbell/<name>.
+    doorbells: dict[str, DoorbellConfig] = Field(default_factory=dict)
     behaviour: BehaviourConfig = Field(default_factory=BehaviourConfig)
     webhook: WebhookConfig = Field(default_factory=WebhookConfig)
 
@@ -189,8 +236,48 @@ class Config(BaseModel):
             return self.service_base_url.rstrip("/")
         return f"http://{_primary_ip()}:{self.listen_port}"
 
-    def chime_url(self) -> str:
-        return f"{self.resolved_base_url()}/chimes/{self.chime.file}"
+    @field_validator("doorbells", mode="before")
+    @classmethod
+    def _doorbell_names(cls, value):
+        if not value:
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError("doorbells must be a mapping of name -> settings")
+        out: dict = {}
+        for raw, settings in value.items():
+            name = str(raw).strip().lower()
+            if name == DEFAULT_DOORBELL:
+                raise ValueError(
+                    f"doorbells: {raw!r} is reserved — the default doorbell is "
+                    f"configured under chime:")
+            if not _DOORBELL_NAME.match(name):
+                raise ValueError(
+                    f"doorbells: {raw!r} can't be used in a URL — use letters, "
+                    f"digits, '-' or '_' (e.g. back-door)")
+            if name in out:
+                raise ValueError(f"doorbells: {raw!r} is listed twice")
+            out[name] = settings
+        return out
+
+    def chime_for(self, doorbell: str | None) -> Chime | None:
+        """The sound for a doorbell, or None if no doorbell has that name."""
+        name = (doorbell or DEFAULT_DOORBELL).strip().lower()
+        if name == DEFAULT_DOORBELL:
+            return Chime(DEFAULT_DOORBELL, self.chime.file,
+                         self.chime.duration_seconds, self.chime.tail_seconds)
+        bell = self.doorbells.get(name)
+        if bell is None:
+            return None
+        tail = bell.tail_seconds if bell.tail_seconds is not None else self.chime.tail_seconds
+        return Chime(name, bell.file, bell.duration_seconds, tail)
+
+    def all_chimes(self) -> list[Chime]:
+        chimes = [self.chime_for(DEFAULT_DOORBELL)]
+        chimes += [self.chime_for(name) for name in sorted(self.doorbells)]
+        return [c for c in chimes if c is not None]
+
+    def chime_url(self, file: str | None = None) -> str:
+        return f"{self.resolved_base_url()}/chimes/{file or self.chime.file}"
 
 
 def _primary_ip() -> str:

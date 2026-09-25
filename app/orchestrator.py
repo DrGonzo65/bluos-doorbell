@@ -27,7 +27,7 @@ from typing import Any
 import httpx
 
 from .bluos import BluOSError, BluOSPlayer, PlayerState, VolumeState
-from .config import Config, ZoneConfig
+from .config import Chime, Config, ZoneConfig
 
 log = logging.getLogger(__name__)
 
@@ -67,6 +67,9 @@ class GroupSnapshot:
 @dataclass
 class RingResult:
     status: str                       # "chimed" | "debounced" | "extended" | "error"
+    #: Doorbells whose chime played, in order — more than one when a second
+    #: doorbell was pressed while the first was still chiming.
+    doorbells: list[str] = field(default_factory=list)
     groups: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -78,6 +81,7 @@ class RingResult:
     def as_dict(self) -> dict[str, Any]:
         return {
             "status": self.status,
+            "doorbells": self.doorbells,
             "groups": self.groups,
             "skipped": self.skipped,
             "errors": self.errors,
@@ -95,9 +99,31 @@ class DoorbellOrchestrator:
         self.registry = registry
         self._gate = asyncio.Lock()
         self._active = False
-        self._repeat_requested = False
-        self._last_ring: float = -1e9
+        #: True only while chimes are actually playing. Before the first chime
+        #: starts, or once restoring has begun, a new press can't join the
+        #: running sequence — it waits for it to finish and starts its own.
+        self._accepting = False
+        #: Chimes waiting to play after the current one, in press order.
+        self._queue: list[Chime] = []
+        #: Doorbells played by the running sequence.
+        self._played: list[str] = []
+        #: The zone subset of the running sequence, if it's a room test.
+        self._running_only: list[ZoneConfig] | None = None
+        #: Set whenever no sequence is running.
+        self._idle = asyncio.Event()
+        self._idle.set()
+        #: Per-doorbell, so the back door isn't ignored because the front door
+        #: rang a few seconds earlier.
+        self._last_ring: dict[str, float] = {}
         self.last_result: RingResult | None = None
+
+    #: Most chimes that can be waiting at once. Two doorbells plus a repeat of
+    #: each is already more than anyone needs to hear.
+    MAX_QUEUED = 4
+
+    def reset_debounce(self) -> None:
+        """Forget recent rings — lets a manual test fire immediately."""
+        self._last_ring.clear()
 
     # -- public entry point ---------------------------------------------------
 
@@ -107,57 +133,101 @@ class DoorbellOrchestrator:
         return self.config.enabled_zones()
 
     async def ring(self, source: str = "manual",
-                   only: list[ZoneConfig] | None = None) -> RingResult:
+                   only: list[ZoneConfig] | None = None,
+                   chime: Chime | None = None) -> RingResult:
         """Run the chime sequence.
 
-        ``only`` restricts it to specific zones — used by the single-room test.
-        A zone that is a group secondary still chimes via its primary, so the
-        whole group hears it; that's how BluOS routes audio.
+        ``chime`` picks the doorbell's sound; it defaults to the one under
+        `chime:` in config. ``only`` restricts the rooms — used by the
+        single-room test. A zone that is a group secondary still chimes via
+        its primary, so the whole group hears it; that's how BluOS routes
+        audio.
         """
+        chime = chime or self.config.chime_for(None)
+
         if not (only or self.target_zones()):
             if self.config.discovery.auto:
                 log.warning("ring from %s ignored — no players discovered yet. "
                             "Check /discover, or list them under zones: in "
                             "config.yaml.", source)
-                return RingResult(status="error",
+                return RingResult(status="error", doorbells=[chime.doorbell],
                                   errors=["no players discovered yet"])
             log.warning("ring from %s ignored — no zones configured. Edit "
                         "config.yaml and restart.", source)
-            return RingResult(status="error",
+            return RingResult(status="error", doorbells=[chime.doorbell],
                               errors=["no zones configured — edit config.yaml"])
 
-        now = time.monotonic()
-
-        async with self._gate:
-            if self._active:
-                # A ring arrived mid-sequence. Replay the chime rather than
-                # starting a second capture — the current snapshot still holds
-                # the true pre-duck volumes.
-                self._repeat_requested = True
-                log.info("ring from %s while active — will repeat the chime", source)
-                return RingResult(status="extended")
-
-            since = now - self._last_ring
-            if since < self.config.behaviour.debounce_seconds:
-                log.info("ring from %s debounced (%.1fs since last)", source, since)
-                return RingResult(status="debounced")
-
-            self._active = True
-            self._repeat_requested = False
+        while True:
+            async with self._gate:
+                if self._active:
+                    # Join the running sequence only while it's actually
+                    # chiming, and only if neither side is a room test — a
+                    # visitor at the door must not ring in just the room
+                    # being tested, nor a test ring the whole house.
+                    if self._accepting and only is None and self._running_only is None:
+                        return self._enqueue(chime, source)
+                else:
+                    since = time.monotonic() - self._last_ring.get(chime.doorbell, float("-inf"))
+                    if since < self.config.behaviour.debounce_seconds:
+                        log.info("%s ring from %s debounced (%.1fs since last)",
+                                 chime.doorbell, source, since)
+                        return RingResult(status="debounced", doorbells=[chime.doorbell])
+                    self._active = True
+                    self._accepting = False
+                    self._queue.clear()
+                    self._played = [chime.doorbell]
+                    self._running_only = only
+                    self._idle.clear()
+                    break
+            # Too early or too late to join — capture hasn't finished or
+            # restore has begun. Wait it out, then start a fresh sequence,
+            # which re-captures the (by then restored) volumes.
+            log.info("%s ring from %s waiting for the current sequence to finish",
+                     chime.doorbell, source)
+            await self._idle.wait()
 
         started = time.monotonic()
         try:
-            result = await self._run_sequence(only)
+            result = await self._run_sequence(only, chime)
         except Exception as exc:  # noqa: BLE001 - never let a ring kill the service
             log.exception("doorbell sequence failed")
-            result = RingResult(status="error", errors=[str(exc)])
+            result = RingResult(status="error", doorbells=list(self._played),
+                                errors=[str(exc)])
         finally:
-            self._active = False
-            self._last_ring = time.monotonic()
+            async with self._gate:
+                ended = time.monotonic()
+                for name in self._played:
+                    self._last_ring[name] = ended
+                if self._queue:
+                    log.warning("dropping %d queued chime(s) that never played: %s",
+                                len(self._queue),
+                                ", ".join(c.doorbell for c in self._queue))
+                self._queue.clear()
+                self._active = False
+                self._accepting = False
+                self._running_only = None
+                self._idle.set()
 
         result.duration_seconds = time.monotonic() - started
         self.last_result = result
         return result
+
+    def _enqueue(self, chime: Chime, source: str) -> RingResult:
+        """Add a chime to the running sequence. Caller holds the gate."""
+        if self._queue and self._queue[-1].doorbell == chime.doorbell:
+            log.info("%s ring from %s — already queued", chime.doorbell, source)
+            return RingResult(status="extended", doorbells=[chime.doorbell],
+                              notes=[f"{chime.doorbell} is already queued"])
+        if len(self._queue) >= self.MAX_QUEUED:
+            log.warning("%s ring from %s — queue full, ignored", chime.doorbell, source)
+            return RingResult(status="extended", doorbells=[chime.doorbell],
+                              notes=["queue full — press ignored"])
+        self._queue.append(chime)
+        log.info("%s ring from %s — queued to play after the chime in progress",
+                 chime.doorbell, source)
+        return RingResult(status="extended", doorbells=[chime.doorbell],
+                          notes=[f"{chime.doorbell} queued to play after the "
+                                 f"chime in progress"])
 
     # -- topology -------------------------------------------------------------
 
@@ -254,7 +324,9 @@ class DoorbellOrchestrator:
 
     # -- the sequence ---------------------------------------------------------
 
-    async def _run_sequence(self, only: list[ZoneConfig] | None = None) -> RingResult:
+    async def _run_sequence(self, only: list[ZoneConfig] | None = None,
+                            chime: Chime | None = None) -> RingResult:
+        chime = chime or self.config.chime_for(None)
         targets, skipped = await self.resolve_groups(only)
         if not targets:
             return RingResult(status="error", skipped=skipped,
@@ -282,8 +354,28 @@ class DoorbellOrchestrator:
         # Anything past this point must restore, even if it throws.
         try:
             await asyncio.gather(*(self._duck(s) for s in live), return_exceptions=True)
-            await asyncio.gather(*(self._chime(s) for s in live), return_exceptions=True)
+
+            # Open the queue only now that sound is actually playing.
+            async with self._gate:
+                self._accepting = True
+            await self._play_all(live, chime)
+
+            # Chimes queued while that played — another doorbell, or the same
+            # one pressed again. Played in order, in every group, before any
+            # restore. Checking and closing the queue under the gate means a
+            # press can't slip in between "queue is empty" and "stop taking".
+            while True:
+                async with self._gate:
+                    if not self._queue:
+                        self._accepting = False
+                        break
+                    nxt = self._queue.pop(0)
+                    self._played.append(nxt.doorbell)
+                log.info("playing queued %s chime", nxt.doorbell)
+                await self._play_all(live, nxt)
         finally:
+            async with self._gate:
+                self._accepting = False
             restores = await asyncio.gather(
                 *(self._restore(s) for s in live), return_exceptions=True
             )
@@ -303,6 +395,7 @@ class DoorbellOrchestrator:
 
         return RingResult(
             status="chimed",
+            doorbells=list(self._played),
             groups=[s.label for s in live],
             skipped=skipped,
             errors=errors,
@@ -361,26 +454,24 @@ class DoorbellOrchestrator:
             return_exceptions=True,
         )
 
-    async def _chime(self, snap: GroupSnapshot) -> None:
-        url = self.config.chime_url()
-        chime = self.config.chime
-        try:
-            await snap.primary.play_url(url)
-        except BluOSError as exc:
-            log.error("chime failed on %s: %s", snap.primary.name, exc)
-            return
+    async def _play_all(self, live: list[GroupSnapshot], chime: Chime) -> None:
+        """Play one chime on every group at once, then wait for it to finish.
 
-        await asyncio.sleep(chime.duration_seconds + chime.tail_seconds)
+        Repeats and queued chimes go through here too, at the sequence level —
+        previously each group looped on a shared flag, so the first group to
+        check it cleared it and a repeat only played in one group.
+        """
+        url = self.config.chime_url(chime.file)
 
-        # Someone leaned on the button again while we were chiming.
-        while self._repeat_requested:
-            self._repeat_requested = False
-            log.info("repeating chime on %s", snap.primary.name)
+        async def one(snap: GroupSnapshot) -> None:
             try:
                 await snap.primary.play_url(url)
-            except BluOSError:
-                break
-            await asyncio.sleep(chime.duration_seconds + chime.tail_seconds)
+            except BluOSError as exc:
+                log.error("%s chime failed on %s: %s", chime.doorbell,
+                          snap.primary.name, exc)
+
+        await asyncio.gather(*(one(s) for s in live))
+        await asyncio.sleep(chime.total_seconds)
 
     async def _restore(self, snap: GroupSnapshot) -> None:
         age = time.monotonic() - snap.captured_at

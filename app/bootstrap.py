@@ -83,6 +83,7 @@ zones: []
   # - name: Back Deck           # a player discovery can't see, pinned by hand
   #   host: 192.168.1.60
 
+# The default doorbell — its webhook is /doorbell.
 chime:
   file: doorbell.mp3
   # Must match the real length of the file. Too short clips the chime; too long
@@ -91,9 +92,19 @@ chime:
   tail_seconds: 0.8
   default_volume: 30
 
+# More doorbells, each with its own sound, ringing the same rooms at the same
+# volumes. Each gets its own webhook: /doorbell/<name>. In UniFi Protect, make
+# one Alarm Manager rule per doorbell camera, each pointing at its own URL.
+# duration_seconds is required — it must match that file's real length.
+doorbells: {}
+  # back:
+  #   file: back-door.mp3       # bundled: three quick descending notes
+  #   duration_seconds: 2.05
+
 behaviour:
-  # Ignore repeat rings inside this window. This is what stops a double-press
-  # from capturing the already-ducked volume as the "previous" volume.
+  # Ignore repeat rings of the SAME doorbell inside this window. Counted per
+  # doorbell, so the back door still rings right after the front door. A
+  # press that arrives while a chime is playing is queued, not ignored.
   debounce_seconds: 8.0
 
   # Soft fade rather than a hard jump. 0 disables.
@@ -142,27 +153,29 @@ def seed_config(config_path: Path) -> bool:
 
 
 def seed_chimes(chime_dir: Path) -> None:
-    """Copy the bundled chime into an empty chimes folder."""
+    """Add any bundled chime the chimes folder doesn't have yet.
+
+    Runs on every start, not just the first, so chimes added in a later
+    release reach existing installs. It only ever adds: a file that's already
+    there — yours, or a bundled one you've replaced — is never overwritten.
+    """
     source_dir = DEFAULTS_DIR / "chimes"
     if not source_dir.is_dir():
         return
 
     try:
         chime_dir.mkdir(parents=True, exist_ok=True)
-        existing = any(chime_dir.iterdir())
     except OSError as exc:
         log.warning("chime folder %s is not usable: %s", chime_dir, exc)
         return
 
-    if existing:
-        return
-
-    for item in source_dir.iterdir():
-        if not item.is_file():
+    for item in sorted(source_dir.iterdir()):
+        target = chime_dir / item.name
+        if not item.is_file() or target.exists():
             continue
         try:
-            shutil.copy2(item, chime_dir / item.name)
-            log.info("installed default chime %s", item.name)
+            shutil.copy2(item, target)
+            log.info("installed bundled chime %s", item.name)
         except OSError as exc:
             log.warning("could not copy %s: %s", item.name, exc)
 

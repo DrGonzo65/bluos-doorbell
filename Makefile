@@ -23,6 +23,7 @@ test:  ## Run every test suite
 	@$(PY) -m tests.test_auth
 	@$(PY) -m tests.test_subnet
 	@$(PY) -m tests.test_single_room
+	@$(PY) -m tests.test_doorbells
 
 run:  ## Run the service locally against config/config.yaml
 	DOORBELL_CONFIG=config/config.yaml DOORBELL_CHIME_DIR=chimes $(PY) -m app

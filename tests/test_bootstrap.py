@@ -84,9 +84,19 @@ def test_never_overwrites():
 
         check("config.yaml byte-identical", config_path.read_text() == mine)
         check("my settings survive", load_config(config_path).listen_port == 9999)
-        check("default chime NOT added over my own",
-              not (chime_dir / "doorbell.mp3").exists(),
+        check("my own chime file untouched",
+              (chime_dir / "my-chime.mp3").read_bytes() == b"not really an mp3")
+        # Bundled chimes are added alongside, so a sound shipped in a later
+        # release reaches an existing install — but never over a file that's
+        # already there, which is what the next check pins.
+        check("missing bundled chime added alongside mine",
+              (chime_dir / "doorbell.mp3").exists(),
               str([p.name for p in chime_dir.iterdir()]))
+
+        (chime_dir / "doorbell.mp3").write_bytes(b"my replacement ding")
+        bootstrap.run(config_path, chime_dir)
+        check("a bundled chime I've REPLACED is never overwritten",
+              (chime_dir / "doorbell.mp3").read_bytes() == b"my replacement ding")
 
 
 def test_readonly_mount_does_not_crash():

@@ -8,6 +8,7 @@ default 8080 usually collides with something else.
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
@@ -21,6 +22,11 @@ from .config import Config, load_config
 def main() -> int:
     # Seed a starter config and the default chime if this is a fresh install,
     # so a GUI-only install never needs a shell.
+    # Seeding runs before the service configures logging, so set up a handler
+    # now — otherwise "installed bundled chime …" never reaches the log.
+    # main.py reconfigures with the level from config.yaml once it's loaded.
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s")
     bootstrap.run(
         Path(os.environ.get("DOORBELL_CONFIG", "/config/config.yaml")),
         Path(os.environ.get("DOORBELL_CHIME_DIR", "/chimes")),
